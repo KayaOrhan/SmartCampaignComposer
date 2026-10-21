@@ -19,6 +19,22 @@ If instructions conflict, RULES.md takes precedence.
 6. Review the actual diff before committing.
 7. Do not commit without explicit approval.
 
+
+## Product Requirements
+
+The original case study is located at docs/CASE_STUDY.md.
+
+Read it before planning or implementing features.
+
+It is the source of truth for product requirements,
+constraints, evaluation criteria and deliverables.
+
+RULES.md defines additional implementation safety
+constraints. DECISIONS.md documents our technical choices.
+
+If a technical decision conflicts with the case study,
+report the conflict and request clarification.
+
 ## Skills
 
 At session start read AGENTS.md, RULES.md, CLAUDE.md and DECISIONS.md. Before the first related edit, read the complete file below using a read-only file tool (PowerShell: `Get-Content -LiteralPath '<path>'`). A catalog description is not a substitute. Load every applicable skill when work crosses subsystems. If a required file is missing or unreadable, stop dependent edits and report the path; do not invent its contract.

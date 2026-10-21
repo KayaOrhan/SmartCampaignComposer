@@ -7,6 +7,21 @@ Hard rules (security, correctness, scope) live in @RULES.md and always apply. If
 ## Stack
 Go (stdlib `net/http`) API and worker, Postgres (data and queue), Vue 3 + TypeScript + Vite, Claude API through the official SDK, Docker Compose. Reasons are in DECISIONS.md.
 
+## Product Requirements
+
+The original case study is located at docs/CASE_STUDY.md.
+
+Read it before planning or implementing features.
+
+It is the source of truth for product requirements,
+constraints, evaluation criteria and deliverables.
+
+RULES.md defines additional implementation safety
+constraints. DECISIONS.md documents our technical choices.
+
+If a technical decision conflicts with the case study,
+report the conflict and request clarification.
+
 ## Layout
 - `cmd/api`, `cmd/worker`, `cmd/mockprovider`
 - `internal/{segment,llm,campaign,delivery,store,config}`
