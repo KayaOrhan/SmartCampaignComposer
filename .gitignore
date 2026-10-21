@@ -1,0 +1,6 @@
+ai-sessions/raw/
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
