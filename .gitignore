@@ -1,4 +1,4 @@
-ai-sessions/raw/
+ai-sessions/
 .env
 .env.local
 .env.*
