@@ -28,7 +28,7 @@ report the conflict and request clarification.
 - `web/` frontend, `seed/` deterministic fake data, `ai-sessions/` exported sessions
 
 ## Commands
-- `make up` start everything (compose, seed, mock provider)
+- `docker compose up` or `make up` starts implemented services; Slice 1 includes API and Postgres only
 - `make test` all tests, no external network or real API key; local Postgres and mock HTTP services are allowed
 - `make lint` linters and secret scan
 - `make check` lint + test; must be green before anything is called done

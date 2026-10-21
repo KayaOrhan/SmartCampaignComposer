@@ -161,3 +161,18 @@ Status: Proposed
 **Consequences.** Separate maxima can reject a template that fits every actual recipient. If the approval snapshot differs from the preview in membership or content, require human approval of an updated preview. Frozen payloads are personal data: keep them out of prompts, logs and session exports. Consent is still rechecked at dispatch.
 
 **Verification.** Cover maxima from different recipients, repeated variables, Unicode rune counting, every field limit and profile changes between preview and approval.
+
+## ADR-015: Backend foundation and single-instance startup migrations
+Status: Proposed
+
+**Context.** The seven-day case study needs a working foundation without a migration framework. The assignment is authoritative for product requirements; the required launch command is plain `docker compose up`.
+
+**Decision.** Use Go net/http and database/sql with the jackc-maintained pgx v5.11.0 driver, verified on pkg.go.dev and its upstream repository before installation. Pin module dependencies in go.mod/go.sum and official container images by digest. Use `/health` for process liveness and `/ready` for a context-bounded PostgreSQL ping. These are canonical instead of the earlier `/healthz` and `/readyz` names in the delivery skill; queue readiness and metrics are later-slice work.
+
+Apply trusted, embedded, numbered SQL files in lexical order in one startup transaction. Store filenames in public.schema_migrations. Failure rolls back and prevents HTTP startup. Previously applied files are immutable by convention; append new files. Run only one API instance until migration coordination is added. No automatic downgrade, checksum framework or distributed runner.
+
+**Alternatives.** PostgreSQL entrypoint initialization scripts (do not apply new migrations to existing volumes); a third-party migration framework (unnecessary dependency here); checksum and coordination framework (outside current scope).
+
+**Consequences.** Pools have 10 open/5 idle connections. Database operations have deadlines; errors omit raw driver details to avoid leaking credentials. The scratch runtime contains only the API binary; current Compose database traffic is local without TLS. Foundation logs have no campaign or delivery identifiers because those entities do not exist yet. Later slices retain the PostgreSQL queue decision in ADR-006.
+
+**Verification.** Endpoint/config tests, safety checks, PostgreSQL migration apply/repeat/rollback tests, Docker startup and database outage/recovery probes. See README for actual results. Keep this record Proposed until required checks pass.
