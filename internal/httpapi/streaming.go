@@ -36,22 +36,17 @@ func registerMessageGeneration(mux *http.ServeMux, store CampaignStore, generato
 			fail(w, segment.Invalid("body_not_allowed", "$"))
 			return
 		}
-		c, err := store.Get(ctx, id)
+		c, audience, err := store.GenerationInput(ctx, id, now().UTC())
 		if err != nil {
 			fail(w, err)
 			return
 		}
-		if c.Status != "draft" {
+		if !campaign.Editable(c.Status) {
 			fail(w, campaign.ErrState)
 			return
 		}
 		if len(c.Segment) == 0 {
 			fail(w, campaign.ErrSegmentRequired)
-			return
-		}
-		audience, err := store.Preview(ctx, id, now().UTC())
-		if err != nil {
-			fail(w, err)
 			return
 		}
 		if _, ok := w.(http.Flusher); !ok {
@@ -110,7 +105,7 @@ func registerMessageGeneration(mux *http.ServeMux, store CampaignStore, generato
 			return
 		}
 		// Preview only: do not save templates or advance campaign state.
-		if err := writeEvent("validated", map[string]any{"attempt": attempt, "messages": v.JSON(), "audience": audience}); err != nil {
+		if err := writeEvent("validated", map[string]any{"attempt": attempt, "base_revision": c.Revision, "messages": v.JSON(), "audience": audience}); err != nil {
 			return
 		}
 	})

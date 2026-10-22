@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -19,8 +20,11 @@ import (
 type CampaignStore interface {
 	Create(context.Context, campaign.Draft) (campaign.Campaign, error)
 	Get(context.Context, int64) (campaign.Campaign, error)
-	PutSegment(context.Context, int64, segment.Validated) (campaign.Campaign, error)
+	PutSegment(context.Context, int64, int64, segment.Validated) (campaign.Campaign, error)
 	Preview(context.Context, int64, time.Time) (campaign.Preview, error)
+	GenerationInput(context.Context, int64, time.Time) (campaign.Campaign, campaign.Preview, error)
+	GetMessages(context.Context, int64) (campaign.SavedMessages, error)
+	PutMessages(context.Context, int64, int64, []byte, time.Time) (campaign.SavedMessages, error)
 }
 
 type campaignAPI struct {
@@ -41,6 +45,8 @@ func registerCampaigns(mux *http.ServeMux, store CampaignStore, now func() time.
 	mux.HandleFunc("GET /campaigns/{id}", bounded(a.get))
 	mux.HandleFunc("PUT /campaigns/{id}/segment", bounded(a.putSegment))
 	mux.HandleFunc("POST /campaigns/{id}/audience-preview", bounded(a.preview))
+	mux.HandleFunc("GET /campaigns/{id}/messages", bounded(a.getMessages))
+	mux.HandleFunc("PUT /campaigns/{id}/messages", bounded(a.putMessages))
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -64,6 +70,16 @@ func fail(w http.ResponseWriter, err error) {
 		if code == "body_too_large" {
 			status = 413
 		}
+		if code == "revision_required" {
+			status = 428
+		}
+		if code == "invalid_revision" {
+			status = 400
+		}
+	case errors.Is(err, campaign.ErrRevision):
+		code, path, status = "campaign_revision_conflict", "revision", 412
+	case errors.Is(err, campaign.ErrConcurrentUpdate):
+		code, path, status = "concurrent_update", "revision", 409
 	case errors.Is(err, campaign.ErrNotFound):
 		code, status = "campaign_not_found", 404
 	case errors.Is(err, campaign.ErrState):
@@ -125,6 +141,7 @@ func (a campaignAPI) create(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Location", "/campaigns/"+strconv.FormatInt(c.ID, 10))
 	slog.Info("campaign created", "campaign_id", c.ID)
+	w.Header().Set("ETag", revisionTag(c.ID, c.Revision))
 	writeJSON(w, 201, c)
 }
 
@@ -139,6 +156,7 @@ func (a campaignAPI) get(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	w.Header().Set("ETag", revisionTag(c.ID, c.Revision))
 	writeJSON(w, 200, c)
 }
 
@@ -158,12 +176,18 @@ func (a campaignAPI) putSegment(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	c, err := a.store.PutSegment(r.Context(), id, v)
+	expected, err := requiredRevision(r, id)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	slog.Info("campaign segment saved", "campaign_id", id)
+	c, err := a.store.PutSegment(r.Context(), id, expected, v)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	slog.Info("campaign segment saved", "campaign_id", id, "revision", c.Revision)
+	w.Header().Set("ETag", revisionTag(c.ID, c.Revision))
 	writeJSON(w, 200, c)
 }
 
@@ -189,4 +213,28 @@ func (a campaignAPI) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, p)
+}
+
+func revisionTag(id, revision int64) string {
+	return fmt.Sprintf(`"campaign-%d-r%d"`, id, revision)
+}
+
+func requiredRevision(r *http.Request, id int64) (int64, error) {
+	values := r.Header.Values("If-Match")
+	if len(values) == 0 {
+		return 0, segment.Invalid("revision_required", "revision")
+	}
+	if len(values) != 1 {
+		return 0, segment.Invalid("invalid_revision", "revision")
+	}
+	value := values[0]
+	prefix := fmt.Sprintf(`"campaign-%d-r`, id)
+	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, `"`) {
+		return 0, segment.Invalid("invalid_revision", "revision")
+	}
+	n, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(value, prefix), `"`), 10, 64)
+	if err != nil || n < 1 || revisionTag(id, n) != value {
+		return 0, segment.Invalid("invalid_revision", "revision")
+	}
+	return n, nil
 }

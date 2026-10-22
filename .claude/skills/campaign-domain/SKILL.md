@@ -14,8 +14,8 @@ brief -> segment DSL (Claude) -> validated query -> audience preview -> messages
 - `users(id, first_name, last_name, email, phone, city, city_norm, language, created_at)`
 - `consents(user_id, channel, granted, updated_at)`: one row per channel. A missing row means no consent.
 - `cart_events(user_id, product_id, added_at)` and `orders(user_id, placed_at, total)`
-- `campaigns(id, brief, segment_json, status, created_at, approved_at)`
-- `campaign_messages(campaign_id, channel, subject, body, edited_by_human)`
+- `campaigns(id, brief, channels, segment_json, status, revision, messages_validated_revision, message_validation_preview, created_at, approved_at)`
+- `campaign_messages(campaign_id, channel, subject, body)`: complete selected-channel set; explicit saves do not establish generated/human provenance.
 - `deliveries`: defined in `delivery-pipeline`.
 
 ## Seed data
@@ -48,6 +48,8 @@ Deterministic (fixed RNG seed), 5000 users. Emails end in `@example.test`; phone
 
 ## State machines
 - Campaign: `draft -> content_ready -> approved -> sending -> completed`, and any state -> `cancelled`.
+- Segment and message writes require the current campaign revision through If-Match; successful writes increment it once. Segment writes from draft/content_ready retain saved text, clear validation metadata and return to draft. Message saves recompute consent-filtered bounds and validate the complete selected-channel set inside one short repeatable-read transaction before replacing rows and moving to content_ready. Rejected writes change nothing. No full content history.
+- Message generation is preview-only and allowed from draft/content_ready with a segment. Read campaign and audience in one snapshot, then close the transaction before calling the provider. Final validated includes base_revision; an explicit save uses that revision and revalidates against current bounds. Never silently retry stale content with a new revision. content_ready is not approval or a frozen audience; stored validation metadata is historical.
 - Approve is legal only from `content_ready`. Editing content moves back to `content_ready` and re-runs validation. No edits after `approved`.
 - The audience and rendered payloads are frozen into `deliveries` at approval (ADR-014). Revalidate against the approval snapshot; if membership or content differs from the preview, return an updated preview for human approval rather than silently approving a changed audience. Never recompute membership or personalize from mutable profiles at send time. Consent revocation and cancellation may reduce actual sends; show skipped deliveries separately.
 

@@ -2,7 +2,7 @@
   "info": {
     "name": "Smart Campaign Composer",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Local API regression checks for implemented slices 1 and 2. Uses synthetic briefs and aggregate previews only. Each full run creates one persistent draft; no delete endpoint exists."
+    "description": "Local mock/test regression suite through Slice 3D. Synthetic data only; generation previews, revision-conditional persistence and editing. No real LLM or delivery calls."
   },
   "variable": [
     {
@@ -22,6 +22,15 @@
         "exec": [
           "const target = pm.variables.replaceIn(pm.variables.get(\"baseUrl\"));",
           "if (!/^http:\\/\\/(127\\.0\\.0\\.1|localhost):8080$/.test(target)) throw new Error(\"This collection permits only the local Compose API on port 8080\");"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (pm.response.code >= 200 && pm.response.code < 300 && (pm.response.headers.get(\"Content-Type\") || \"\").includes(\"application/json\")) { const data = pm.response.json(); if ((data.id || data.campaign_id) && data.revision) { pm.variables.set(\"campaignETag\", pm.response.headers.get(\"ETag\")); pm.variables.set(\"campaignRevision\", data.revision); } }"
         ]
       }
     }
@@ -102,7 +111,7 @@
               "pm.test(\"JSON, no-store response\", () => { pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\"); pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\"); });",
               "const data = pm.response.json();",
               "pm.test(\"Draft contract and Location\", () => {",
-              "  pm.expect(data).to.have.all.keys(\"id\", \"brief\", \"channels\", \"segment\", \"status\", \"created_at\");",
+              "  pm.expect(data).to.have.all.keys(\"id\", \"brief\", \"channels\", \"segment\", \"status\", \"created_at\", \"revision\");",
               "  pm.expect(Number.isSafeInteger(data.id) && data.id > 0).to.eql(true);",
               "  pm.expect(data.brief).to.eql(\"Postman synthetic campaign\");",
               "  pm.expect(data.channels).to.deep.eql([\"sms\", \"email\"]);",
@@ -188,6 +197,10 @@
           {
             "key": "Content-Type",
             "value": "application/json"
+          },
+          {
+            "key": "If-Match",
+            "value": "{{campaignETag}}"
           }
         ],
         "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
@@ -202,6 +215,15 @@
         }
       },
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -586,6 +608,10 @@
           {
             "key": "Content-Type",
             "value": "application/json"
+          },
+          {
+            "key": "If-Match",
+            "value": "{{campaignETag}}"
           }
         ],
         "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
@@ -600,6 +626,15 @@
         }
       },
       "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+            ]
+          }
+        },
         {
           "listen": "test",
           "script": {
@@ -703,6 +738,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
               }
             ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
@@ -717,6 +756,15 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "prerequest",
               "script": {
@@ -789,6 +837,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
               }
             ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
@@ -803,6 +855,15 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -823,6 +884,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
               }
             ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
@@ -837,6 +902,15 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "prerequest",
               "script": {
@@ -909,6 +983,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
               }
             ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
@@ -923,6 +1001,15 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -943,6 +1030,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
               }
             ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
@@ -957,6 +1048,15 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "prerequest",
               "script": {
@@ -1007,10 +1107,24 @@
           "name": "Generate mock segment",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              }
+            ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment"
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "prerequest",
               "script": {
@@ -1078,10 +1192,24 @@
           "name": "Repeat mock generation",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              }
+            ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment"
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -1103,6 +1231,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
               }
             ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment",
@@ -1112,6 +1244,15 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -1128,10 +1269,24 @@
           "name": "Generation rejects invalid id",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              }
+            ],
             "url": "{{baseUrl}}/campaigns/0/generate-segment"
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -1148,10 +1303,24 @@
           "name": "Generation missing campaign",
           "request": {
             "method": "POST",
-            "header": [],
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              }
+            ],
             "url": "{{baseUrl}}/campaigns/9223372036854775807/generate-segment"
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -1172,6 +1341,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
               }
             ],
             "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment",
@@ -1181,6 +1354,15 @@
             }
           },
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const resolved = pm.variables.replaceIn(pm.request.url.toString()); const match = resolved.match(/\\/campaigns\\/(\\d+)\\//); if (match && match[1] !== pm.variables.get(\"campaignId\")) pm.request.headers.upsert({key:\"If-Match\", value:`\"campaign-${match[1]}-r1\"`});"
+                ]
+              }
+            },
             {
               "listen": "prerequest",
               "script": {
@@ -1269,7 +1451,9 @@
                   "pm.test(\"Complete selected channels match streamed text\",()=>{pm.expect(last.messages).to.have.all.keys(\"sms\",\"email\");pm.expect(last.messages.sms).to.have.all.keys(\"body\");pm.expect(last.messages.email).to.have.all.keys(\"subject\",\"body\");for(const [ch,fields] of Object.entries(last.messages))for(const [field,text] of Object.entries(fields))pm.expect(text).to.eql(parts[ch+\".\"+field]);});",
                   "pm.test(\"Rendered worst-case limits and allowed placeholders\",()=>{for(const [ch,fields] of Object.entries(last.messages)){const b=last.audience.by_channel[ch];for(const [field,text] of Object.entries(fields)){pm.expect(text.trim()).not.to.eql(\"\");const rendered=text.replace(/\\{\\{(first_name|city)\\}\\}/g,(_,name)=>\"x\".repeat(b.count===0?(name===\"first_name\"?80:120):b[name===\"first_name\"?\"max_first_name_runes\":\"max_city_runes\"]));pm.expect(rendered).not.to.match(/[{}]/);pm.expect(Array.from(rendered).length).to.be.at.most(ch===\"sms\"?160:field===\"subject\"?80:2000);}}});",
                   "pm.test(\"Aggregate audience only\",()=>{pm.expect(last.audience).to.have.all.keys(\"as_of\",\"eligible_unique\",\"by_channel\");pm.expect(last.audience.by_channel).to.have.all.keys(\"sms\",\"email\");for(const b of Object.values(last.audience.by_channel))pm.expect(b).to.have.all.keys(\"count\",\"max_first_name_runes\",\"max_city_runes\");});",
-                  "pm.variables.set(\"generatedMessages\",JSON.stringify(last.messages));"
+                  "pm.variables.set(\"generatedMessages\",JSON.stringify(last.messages));",
+                  "pm.test(\"Bounded display deltas\",()=>{for(const f of frames.filter(f=>f.kind===\"delta\")){pm.expect(f.data.text).to.be.a(\"string\");pm.expect(Buffer.byteLength(f.data.text,\"utf8\")).to.be.within(1,1024);}});",
+                  "pm.test(\"Terminal payload contains no provider diagnostics\",()=>pm.expect(last).to.have.all.keys(\"attempt\",\"messages\",\"audience\",\"base_revision\"));"
                 ]
               }
             }
@@ -1296,7 +1480,9 @@
                   "pm.test(\"Complete selected channels match streamed text\",()=>{pm.expect(last.messages).to.have.all.keys(\"sms\",\"email\");pm.expect(last.messages.sms).to.have.all.keys(\"body\");pm.expect(last.messages.email).to.have.all.keys(\"subject\",\"body\");for(const [ch,fields] of Object.entries(last.messages))for(const [field,text] of Object.entries(fields))pm.expect(text).to.eql(parts[ch+\".\"+field]);});",
                   "pm.test(\"Rendered worst-case limits and allowed placeholders\",()=>{for(const [ch,fields] of Object.entries(last.messages)){const b=last.audience.by_channel[ch];for(const [field,text] of Object.entries(fields)){pm.expect(text.trim()).not.to.eql(\"\");const rendered=text.replace(/\\{\\{(first_name|city)\\}\\}/g,(_,name)=>\"x\".repeat(b.count===0?(name===\"first_name\"?80:120):b[name===\"first_name\"?\"max_first_name_runes\":\"max_city_runes\"]));pm.expect(rendered).not.to.match(/[{}]/);pm.expect(Array.from(rendered).length).to.be.at.most(ch===\"sms\"?160:field===\"subject\"?80:2000);}}});",
                   "pm.test(\"Aggregate audience only\",()=>{pm.expect(last.audience).to.have.all.keys(\"as_of\",\"eligible_unique\",\"by_channel\");pm.expect(last.audience.by_channel).to.have.all.keys(\"sms\",\"email\");for(const b of Object.values(last.audience.by_channel))pm.expect(b).to.have.all.keys(\"count\",\"max_first_name_runes\",\"max_city_runes\");});",
-                  "pm.variables.set(\"generatedMessages\",JSON.stringify(last.messages));"
+                  "pm.variables.set(\"generatedMessages\",JSON.stringify(last.messages));",
+                  "pm.test(\"Bounded display deltas\",()=>{for(const f of frames.filter(f=>f.kind===\"delta\")){pm.expect(f.data.text).to.be.a(\"string\");pm.expect(Buffer.byteLength(f.data.text,\"utf8\")).to.be.within(1,1024);}});",
+                  "pm.test(\"Terminal payload contains no provider diagnostics\",()=>pm.expect(last).to.have.all.keys(\"attempt\",\"messages\",\"audience\",\"base_revision\"));"
                 ]
               }
             }
@@ -1424,6 +1610,800 @@
                 "exec": [
                   "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
                   "pm.test(\"Still draft with same segment and no saved messages\",()=>{const c=pm.response.json();pm.expect(c.status).to.eql(\"draft\");pm.expect(c.segment).to.deep.eql(JSON.parse(pm.variables.get(\"messageSourceSegment\")));pm.expect(c).not.to.have.property(\"messages\");});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Message persistence and editing (3D)",
+      "item": [
+        {
+          "name": "No saved messages after generation",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Preview never persisted\",()=>{const d=pm.response.json();pm.expect(d.messages).to.eql(null);pm.expect(d.validation).to.eql(null);pm.expect(d.status).to.eql(\"draft\");});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate candidate for explicit save",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200 SSE, no-store\",()=>{pm.response.to.have.status(200);pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/event-stream\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});",
+                  "const frames=pm.response.text().trim().split(/\\r?\\n\\r?\\n/).map(frame=>{const lines=frame.split(/\\r?\\n/);if(lines.length!==2)throw new Error(\"Bad SSE frame\");return {kind:lines[0].replace(/^event: /,\"\"),data:JSON.parse(lines[1].replace(/^data: /,\"\"))};});",
+                  "let attempt=0,parts={},last=null,finals=0,deltas=0;",
+                  "for(const frame of frames){const e=frame.data;if(frame.kind===\"attempt\"){pm.expect(e.attempt).to.eql(attempt+1);attempt=e.attempt;parts={};}else if(frame.kind===\"delta\"){pm.expect(e.attempt).to.eql(attempt);pm.expect([\"sms\",\"email\"]).to.include(e.channel);pm.expect(e.channel===\"sms\"?[\"body\"]:[\"subject\",\"body\"]).to.include(e.field);const key=e.channel+\".\"+e.field;parts[key]=(parts[key]||\"\")+e.text;deltas++;}else if(frame.kind===\"validated\"){last=e;finals++;}else throw new Error(\"Stream failed: \"+frame.kind);}",
+                  "pm.test(\"One terminal validated event after deltas\",()=>{pm.expect(finals).to.eql(1);pm.expect(deltas).to.be.above(1);pm.expect(frames[frames.length-1].kind).to.eql(\"validated\");pm.expect(last.attempt).to.eql(attempt);});",
+                  "pm.test(\"Complete selected channels match streamed text\",()=>{pm.expect(last.messages).to.have.all.keys(\"sms\",\"email\");pm.expect(last.messages.sms).to.have.all.keys(\"body\");pm.expect(last.messages.email).to.have.all.keys(\"subject\",\"body\");for(const [ch,fields] of Object.entries(last.messages))for(const [field,text] of Object.entries(fields))pm.expect(text).to.eql(parts[ch+\".\"+field]);});",
+                  "pm.test(\"Rendered worst-case limits and allowed placeholders\",()=>{for(const [ch,fields] of Object.entries(last.messages)){const b=last.audience.by_channel[ch];for(const [field,text] of Object.entries(fields)){pm.expect(text.trim()).not.to.eql(\"\");const rendered=text.replace(/\\{\\{(first_name|city)\\}\\}/g,(_,name)=>\"x\".repeat(b.count===0?(name===\"first_name\"?80:120):b[name===\"first_name\"?\"max_first_name_runes\":\"max_city_runes\"]));pm.expect(rendered).not.to.match(/[{}]/);pm.expect(Array.from(rendered).length).to.be.at.most(ch===\"sms\"?160:field===\"subject\"?80:2000);}}});",
+                  "pm.test(\"Aggregate audience only\",()=>{pm.expect(last.audience).to.have.all.keys(\"as_of\",\"eligible_unique\",\"by_channel\");pm.expect(last.audience.by_channel).to.have.all.keys(\"sms\",\"email\");for(const b of Object.values(last.audience.by_channel))pm.expect(b).to.have.all.keys(\"count\",\"max_first_name_runes\",\"max_city_runes\");});",
+                  "pm.variables.set(\"generatedMessages\",JSON.stringify(last.messages));",
+                  "pm.test(\"Bounded display deltas\",()=>{for(const f of frames.filter(f=>f.kind===\"delta\")){pm.expect(f.data.text).to.be.a(\"string\");pm.expect(Buffer.byteLength(f.data.text,\"utf8\")).to.be.within(1,1024);}});",
+                  "pm.test(\"Terminal payload contains no provider diagnostics\",()=>pm.expect(last).to.have.all.keys(\"attempt\",\"messages\",\"audience\",\"base_revision\"));",
+                  "pm.test(\"Preview revision matches source\",()=>pm.expect(last.base_revision).to.eql(Number(pm.variables.get(\"campaignRevision\"))));",
+                  "pm.variables.set(\"messagePayload\",JSON.stringify({messages:last.messages})); pm.variables.set(\"expectedMessages\",JSON.stringify(last.messages)); pm.variables.set(\"staleETag\",`\"campaign-${pm.variables.get(\"campaignId\")}-r${last.base_revision}\"`);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Explicitly save generated candidate",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{messagePayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Complete content ready at next revision\",()=>{const d=pm.response.json();pm.expect(d.status).to.eql(\"content_ready\");pm.expect(d.validation.revision).to.eql(d.revision);pm.expect(d.messages).to.deep.eql(JSON.parse(pm.variables.get(\"expectedMessages\")));pm.expect(d.validation.audience.as_of).to.match(/Z$/);});",
+                  "pm.variables.set(\"savedRevision\",pm.response.json().revision);",
+                  "pm.test(\"Save increments captured generation revision once\",()=>{const old=Number(pm.variables.get(\"staleETag\").match(/-r(\\d+)\"$/)[1]);pm.expect(pm.response.json().revision).to.eql(old+1);});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Regenerate preview from content_ready",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200 SSE from content_ready\",()=>{pm.response.to.have.status(200);pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/event-stream\");});",
+                  "const finals=pm.response.text().trim().split(/\\r?\\n\\r?\\n/).filter(f=>f.startsWith(\"event: validated\"));",
+                  "pm.test(\"One validated preview at current revision\",()=>{pm.expect(finals.length).to.eql(1);const d=JSON.parse(finals[0].split(/\\r?\\n/)[1].slice(6));pm.expect(d.base_revision).to.eql(Number(pm.variables.get(\"savedRevision\")));});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read saved messages",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Messages survive retrieval\",()=>{const d=pm.response.json();pm.expect(d.messages).to.deep.eql(JSON.parse(pm.variables.get(\"expectedMessages\")));pm.expect(d.revision).to.eql(Number(pm.variables.get(\"savedRevision\")));});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject stale candidate save",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{staleETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{messagePayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 412\",()=>pm.response.to.have.status(412));",
+                  "pm.test(\"Revision conflict\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"campaign_revision_conflict\",path:\"revision\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject unknown template variable",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": {\"sms\": {\"body\": \"{{unknown}}\"}, \"email\": {\"subject\": \"Offer\", \"body\": \"Body\"}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject long SMS",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": {\"sms\": {\"body\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}, \"email\": {\"subject\": \"Offer\", \"body\": \"Body\"}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject long email subject",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": {\"sms\": {\"body\": \"Hi\"}, \"email\": {\"subject\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\", \"body\": \"Body\"}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject long email body",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": {\"sms\": {\"body\": \"Hi\"}, \"email\": {\"subject\": \"Offer\", \"body\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject incomplete channel set",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": {\"sms\": {\"body\": \"Hi\"}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject unknown envelope field",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": {}, \"status\": \"approved\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject null messages",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": null}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject duplicate message fields",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\":{\"sms\":{\"body\":\"one\",\"body\":\"two\"},\"email\":{\"subject\":\"Offer\",\"body\":\"Body\"}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\",()=>pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Require revision on message save",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{messagePayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 428\",()=>pm.response.to.have.status(428));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject wildcard revision",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "*"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{messagePayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\",()=>pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Require revision on segment save",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"version\":1,\"all\":[{\"field\":\"language\",\"op\":\"in\",\"value\":[\"tr\"]}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 428\",()=>pm.response.to.have.status(428));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Require revision on segment generation",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 428\",()=>pm.response.to.have.status(428));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rejected edits preserve content and revision",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Rejected edits did not change saved state\",()=>{const d=pm.response.json();pm.expect(d.revision).to.eql(Number(pm.variables.get(\"savedRevision\")));pm.expect(d.messages).to.deep.eql(JSON.parse(pm.variables.get(\"expectedMessages\")));pm.expect(d.status).to.eql(\"content_ready\");});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Save human edits",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": {\"sms\": {\"body\": \"Human edited {{first_name}}\"}, \"email\": {\"subject\": \"Updated offer\", \"body\": \"Human edited email for {{city}}\"}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Edited text saved and revalidated\",()=>{const d=pm.response.json();pm.expect(d.messages.sms.body).to.eql(\"Human edited {{first_name}}\");pm.expect(d.validation.revision).to.eql(d.revision);pm.expect(d.revision).to.eql(Number(pm.variables.get(\"savedRevision\"))+1);});",
+                  "pm.variables.set(\"expectedMessages\",JSON.stringify(pm.response.json().messages));pm.variables.set(\"messagePayload\",JSON.stringify({messages:pm.response.json().messages}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Segment change invalidates content readiness",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"version\":1,\"all\":[{\"field\":\"language\",\"op\":\"in\",\"value\":[\"tr\"]}]}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Segment returns campaign to draft\",()=>pm.expect(pm.response.json().status).to.eql(\"draft\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read retained human text after segment change",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Text retained with invalidated validation\",()=>{const d=pm.response.json();pm.expect(d.messages).to.deep.eql(JSON.parse(pm.variables.get(\"expectedMessages\")));pm.expect(d.validation).to.eql(null);pm.expect(d.status).to.eql(\"draft\");});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Explicitly revalidate retained content",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{messagePayload}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Complete content ready at next revision\",()=>{const d=pm.response.json();pm.expect(d.status).to.eql(\"content_ready\");pm.expect(d.validation.revision).to.eql(d.revision);pm.expect(d.messages).to.deep.eql(JSON.parse(pm.variables.get(\"expectedMessages\")));pm.expect(d.validation.audience.as_of).to.match(/Z$/);});",
+                  "pm.variables.set(\"savedRevision\",pm.response.json().revision);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generated segment also invalidates readiness",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              }
+            ]
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Generated segment returns draft\",()=>pm.expect(pm.response.json().status).to.eql(\"draft\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generated segment preserves saved text",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/messages",
+            "header": []
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Human text retained after segment generation\",()=>{const d=pm.response.json();pm.expect(d.messages).to.deep.eql(JSON.parse(pm.variables.get(\"expectedMessages\")));pm.expect(d.validation).to.eql(null);});"
                 ]
               }
             }

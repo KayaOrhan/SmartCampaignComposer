@@ -51,11 +51,11 @@ func Load(getenv func(string) string) (Config, error) {
 	if c.LLMProvider == "" {
 		c.LLMProvider = "mock"
 	}
-	if c.LLMProvider != "mock" {
-		if getenv("APP_ENV") == "test" && c.LLMProvider == "anthropic" {
-			return Config{}, errors.New("real LLM provider forbidden in test")
-		}
-		return Config{}, errors.New("only mock LLM provider is implemented")
+	if c.LLMProvider != "mock" && c.LLMProvider != "anthropic" {
+		return Config{}, errors.New("LLM_PROVIDER must be mock or anthropic")
+	}
+	if c.LLMProvider == "anthropic" && getenv("APP_ENV") == "test" {
+		return Config{}, errors.New("real LLM provider forbidden in test")
 	}
 	c.LLMMockScenario = getenv("LLM_MOCK_SCENARIO")
 	c.LLMTimeout = 10 * time.Second

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/KayaOrhan/SmartCampaignComposer/internal/campaign"
 	"github.com/KayaOrhan/SmartCampaignComposer/internal/segment"
 )
@@ -25,7 +27,7 @@ func (s Campaigns) Create(ctx context.Context, draft campaign.Draft) (campaign.C
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
 	var c campaign.Campaign
-	err = s.DB.QueryRowContext(ctx, `INSERT INTO app.campaigns(brief,channels) VALUES ($1,$2) RETURNING id,brief,channels,status,created_at`, draft.Brief, draft.Channels).Scan(&c.ID, &c.Brief, &c.Channels, &c.Status, &c.CreatedAt)
+	err = s.DB.QueryRowContext(ctx, `INSERT INTO app.campaigns(brief,channels) VALUES ($1,$2) RETURNING id,brief,channels,status,created_at,revision`, draft.Brief, draft.Channels).Scan(&c.ID, &c.Brief, &c.Channels, &c.Status, &c.CreatedAt, &c.Revision)
 	if err != nil {
 		return campaign.Campaign{}, ErrUnavailable
 	}
@@ -38,12 +40,12 @@ type rowScanner interface{ Scan(...any) error }
 func readCampaign(row rowScanner) (campaign.Campaign, error) {
 	var c campaign.Campaign
 	var raw []byte
-	err := row.Scan(&c.ID, &c.Brief, &c.Channels, &raw, &c.Status, &c.CreatedAt)
+	err := row.Scan(&c.ID, &c.Brief, &c.Channels, &raw, &c.Status, &c.CreatedAt, &c.Revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, campaign.ErrNotFound
 	}
 	if err != nil {
-		return c, ErrUnavailable
+		return c, databaseError(err)
 	}
 	if raw != nil {
 		validated, err := segment.ParseDocument(raw)
@@ -56,7 +58,7 @@ func readCampaign(row rowScanner) (campaign.Campaign, error) {
 	return c, nil
 }
 
-const campaignColumns = `id,brief,channels,segment_json,status,created_at`
+const campaignColumns = `id,brief,channels,segment_json,status,created_at,revision`
 
 func (s Campaigns) Get(ctx context.Context, id int64) (campaign.Campaign, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
@@ -64,7 +66,7 @@ func (s Campaigns) Get(ctx context.Context, id int64) (campaign.Campaign, error)
 	return readCampaign(s.DB.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1`, id))
 }
 
-func (s Campaigns) PutSegment(ctx context.Context, id int64, v segment.Validated) (result campaign.Campaign, resultErr error) {
+func (s Campaigns) PutSegment(ctx context.Context, id, expected int64, v segment.Validated) (result campaign.Campaign, resultErr error) {
 	if _, err := segment.ParseDocument(v.JSON()); err != nil {
 		return result, err
 	}
@@ -79,17 +81,30 @@ func (s Campaigns) PutSegment(ctx context.Context, id int64, v segment.Validated
 	if err != nil {
 		return result, err
 	}
-	if c.Status != "draft" {
+	if c.Revision != expected {
+		return result, campaign.ErrRevision
+	}
+	if !campaign.Editable(c.Status) {
 		return result, campaign.ErrState
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE app.campaigns SET segment_json=$1::jsonb WHERE id=$2`, string(v.JSON()), id); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE app.campaigns SET segment_json=$1::jsonb,revision=revision+1,status='draft',messages_validated_revision=NULL,message_validation_preview=NULL WHERE id=$2`, string(v.JSON()), id); err != nil {
 		return result, ErrUnavailable
 	}
 	if err := tx.Commit(); err != nil {
 		return result, ErrUnavailable
 	}
 	c.Segment = v.JSON()
+	c.Revision++
+	c.Status = "draft"
 	return c, nil
+}
+
+func databaseError(err error) error {
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "40001" {
+		return campaign.ErrConcurrentUpdate
+	}
+	return ErrUnavailable
 }
 
 func finishTx(tx *sql.Tx, result *error) {

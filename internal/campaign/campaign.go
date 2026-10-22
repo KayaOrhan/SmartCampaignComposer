@@ -13,6 +13,10 @@ import (
 var ErrNotFound = errors.New("campaign not found")
 var ErrState = errors.New("campaign state does not allow this operation")
 var ErrSegmentRequired = errors.New("campaign segment required")
+var ErrRevision = errors.New("campaign revision conflict")
+var ErrConcurrentUpdate = errors.New("concurrent campaign update")
+
+func Editable(status string) bool { return status == "draft" || status == "content_ready" }
 
 type Draft struct {
 	Brief    string   `json:"brief"`
@@ -20,6 +24,7 @@ type Draft struct {
 }
 type Campaign struct {
 	ID        int64           `json:"id"`
+	Revision  int64           `json:"revision"`
 	Brief     string          `json:"brief"`
 	Channels  []string        `json:"channels"`
 	Segment   json.RawMessage `json:"segment"`

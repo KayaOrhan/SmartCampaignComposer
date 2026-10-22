@@ -24,7 +24,7 @@ type generationStore struct {
 func (s *generationStore) Get(ctx context.Context, id int64) (campaign.Campaign, error) {
 	return s.current, s.getErr
 }
-func (s *generationStore) PutSegment(ctx context.Context, id int64, v segment.Validated) (campaign.Campaign, error) {
+func (s *generationStore) PutSegment(ctx context.Context, id, expected int64, v segment.Validated) (campaign.Campaign, error) {
 	s.puts++
 	if s.putErr != nil {
 		return campaign.Campaign{}, s.putErr
@@ -32,11 +32,33 @@ func (s *generationStore) PutSegment(ctx context.Context, id int64, v segment.Va
 	if ctx.Err() != nil {
 		return campaign.Campaign{}, ctx.Err()
 	}
+	if expected != s.current.Revision {
+		return campaign.Campaign{}, campaign.ErrRevision
+	}
 	s.current.Segment = v.JSON()
+	s.current.Revision++
 	return s.current, nil
 }
 
 type generationFunc func(context.Context, int64, string) (segment.Validated, error)
+
+func TestSlowGeneratedSegmentCannotOverwriteEdit(t *testing.T) {
+	s := &generationStore{current: campaign.Campaign{ID: 1, Revision: 1, Brief: "brief", Status: "draft"}}
+	g := generationFunc(func(ctx context.Context, id int64, brief string) (segment.Validated, error) {
+		// A competing write committed while generation was in progress.
+		s.current.Revision = 2
+		return segment.Parse([]byte(`{"version":1,"all":[{"field":"language","op":"in","value":["tr"]}]}`))
+	})
+	mux := http.NewServeMux()
+	registerGeneration(mux, s, g, time.Second)
+	r := httptest.NewRequest("POST", "/campaigns/1/generate-segment", nil)
+	r.Header.Set("If-Match", revisionTag(1, 1))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 412 || s.current.Segment != nil || s.current.Revision != 2 {
+		t.Fatal("stale generation overwrote edit")
+	}
+}
 
 func (f generationFunc) ExtractSegment(ctx context.Context, id int64, brief string) (segment.Validated, error) {
 	return f(ctx, id, brief)
@@ -67,7 +89,7 @@ func TestGenerateSegmentEndpoint(t *testing.T) {
 			if state == "" {
 				state = "draft"
 			}
-			s := &generationStore{current: campaign.Campaign{ID: 1, Brief: "stored brief", Channels: []string{"sms"}, Status: state, Segment: old}, getErr: tc.getErr, putErr: tc.putErr}
+			s := &generationStore{current: campaign.Campaign{ID: 1, Revision: 1, Brief: "stored brief", Channels: []string{"sms"}, Status: state, Segment: old}, getErr: tc.getErr, putErr: tc.putErr}
 			calls := 0
 			g := generationFunc(func(ctx context.Context, id int64, brief string) (segment.Validated, error) {
 				calls++
@@ -82,7 +104,9 @@ func TestGenerateSegmentEndpoint(t *testing.T) {
 			mux := http.NewServeMux()
 			registerGeneration(mux, s, g, time.Second)
 			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, httptest.NewRequest("POST", "/campaigns/1/generate-segment", strings.NewReader(tc.body)))
+			request := httptest.NewRequest("POST", "/campaigns/1/generate-segment", strings.NewReader(tc.body))
+			request.Header.Set("If-Match", revisionTag(1, 1))
+			mux.ServeHTTP(w, request)
 			if w.Code != tc.status || calls != tc.called || s.puts != tc.puts {
 				t.Fatalf("status=%d calls=%d puts=%d", w.Code, calls, s.puts)
 			}
@@ -103,7 +127,7 @@ func TestGenerateSegmentEndpoint(t *testing.T) {
 }
 
 func TestGenerateTimeoutDoesNotSave(t *testing.T) {
-	s := &generationStore{current: campaign.Campaign{ID: 1, Brief: "brief", Status: "draft"}}
+	s := &generationStore{current: campaign.Campaign{ID: 1, Revision: 1, Brief: "brief", Status: "draft"}}
 	g := generationFunc(func(ctx context.Context, id int64, brief string) (segment.Validated, error) {
 		<-ctx.Done()
 		return segment.Validated{}, &llm.Error{Code: "llm_timeout", Path: "$"}
@@ -111,7 +135,9 @@ func TestGenerateTimeoutDoesNotSave(t *testing.T) {
 	mux := http.NewServeMux()
 	registerGeneration(mux, s, g, time.Millisecond)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest("POST", "/campaigns/1/generate-segment", nil))
+	request := httptest.NewRequest("POST", "/campaigns/1/generate-segment", nil)
+	request.Header.Set("If-Match", revisionTag(1, 1))
+	mux.ServeHTTP(w, request)
 	if w.Code != 504 || s.puts != 0 {
 		t.Fatal("timed out generation persisted")
 	}

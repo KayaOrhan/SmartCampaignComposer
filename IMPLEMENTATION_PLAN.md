@@ -37,9 +37,19 @@ Approved scope: fixture-backed replaceable LLM provider, versioned segment promp
 
 Approved scope: selected-channel SMS/email validator with worst-case placeholder rendering, versioned message prompt/schema, mock chunks with configurable delay and failure scenarios, shared bounded call runner/auditing, and bodyless POST `/campaigns/{id}/generate-messages` over SSE. Events are attempt, provisional delta, then terminal validated/error. Recompute an aggregate consent-aware preview; keep messages ephemeral and campaign state draft. Migration 004 extends audit call names. Cover real incremental flushing, disconnects, repairs, limit boundaries and local Postman SSE assertions. No message persistence/editing/approval, frontend, real Claude or delivery. See ADR-019 and README for behavior and actual checks.
 
+## Slice 3C: Real Claude adapter
+
+Approved scope: official SDK v1.82.0 behind both validated provider interfaces, forced tools/schema/token bounds, incremental tool JSON decoding, strict terminal/tool checks, safe errors/usage metadata, explicit model/key configuration, test construction guard, mock default, and CA certificates in scratch. Preserve existing repair/retry/timeouts and public endpoint/SSE contracts. Verify SDK requests against local HTTP fixtures, plus decoder edge cases, full Go/PostgreSQL/Docker and mock-only Postman regressions. No real API verification, message persistence/approval, frontend or delivery changes. See ADR-020 and README.
+
+## Slice 3D: Explicit message persistence and human editing
+
+Approved scope: keep SSE generation preview-only; explicit full-set GET/PUT messages; reuse current audience bounds and domain validators; campaign-wide monotonic revisions with required If-Match on every mutation; retain text but invalidate readiness after segment writes; no content history or unverifiable provenance.
+
+Implementation increments: (1) separate forced-tool model configuration correction; (2) migration 005, revision-aware domain/store/HTTP and existing Postman contracts; (3) migration 006, transactional message persistence/editing, coherent GenerationInput and base_revision SSE payload; (4) concurrency, cancellation, upgrade, rollback and local Postman lifecycle verification. Each increment is checked before advancing. Provider interfaces, mock default and existing validation/security boundaries remain. No approval, enqueue, worker, delivery, frontend or live Anthropic calls. See ADR-021/022 and README for contracts and evidence.
+
 ## Later slices
 
-1. Campaign messages/edit/approval, real Claude integration and streamed messages.
+1. Campaign approval and live Claude smoke verification when explicitly authorized.
 3. PostgreSQL deliveries queue (ADR-006), worker, retries, idempotency and fault-injecting mock provider.
 4. Vue interface, dashboard and metrics; final verification and sanitized session exports.
 

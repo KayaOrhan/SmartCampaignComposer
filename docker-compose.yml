@@ -20,11 +20,14 @@ services:
       HTTP_ADDR: :8080
       DB_TIMEOUT: 2s
       SEED_DATA: "true"
-      LLM_PROVIDER: mock
+      APP_ENV: ${APP_ENV:-development}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
       LLM_MOCK_SCENARIO: happy
       LLM_MOCK_MESSAGE_SCENARIO: happy
       LLM_MOCK_CHUNK_DELAY: 10ms
-      LLM_TIMEOUT: 10s
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-10s}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

@@ -136,7 +136,7 @@ func TestMessageBoundariesAndCancellation(t *testing.T) {
 			}
 			return nil
 		})
-		if !errors.As(err, &e) || e.Code != "llm_unavailable" || emitted != 0 {
+		if !errors.As(err, &e) || e.Code != "llm_output_invalid" || emitted != 0 {
 			t.Fatal("invalid display delta escaped", err)
 		}
 	}

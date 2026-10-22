@@ -75,7 +75,7 @@ func (g MessageGenerator) GenerateMessages(ctx context.Context, id int64, brief 
 			}
 			bytes += len(text)
 			if !selected || (field != "body" && !(channel == "email" && field == "subject")) || !utf8.ValidString(text) || len(text) == 0 || len(text) > 1024 || bytes > 32768 {
-				return errors.New("invalid provider display delta")
+				return errProviderOutput
 			}
 			return emit("delta", Event{Attempt: attempt, Channel: channel, Field: field, Text: text})
 		})

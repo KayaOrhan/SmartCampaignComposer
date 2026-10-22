@@ -178,7 +178,9 @@ Apply trusted, embedded, numbered SQL files in lexical order in one startup tran
 **Verification.** Endpoint/config tests, safety checks, PostgreSQL migration apply/repeat/rollback tests, Docker startup and database outage/recovery probes. See README for actual results. Keep this record Proposed until required checks pass.
 
 ## ADR-016: Draft campaigns and consent-aware segment previews
-Status: Accepted
+Status: Superseded by ADR-022
+
+Only the draft-only editing/preview and last-completed-save policies are superseded; other decisions remain applicable.
 
 **Context.** Slice 2 must exercise the validated audience flow before LLM generation or delivery is implemented. Missing consent must exclude recipients, and repeated cart/order rows must not inflate counts.
 
@@ -206,7 +208,9 @@ Status: Accepted
 **Verification.** Unit, HTTP, PostgreSQL and maintained Postman regressions; actual execution results are recorded in README.
 
 ## ADR-018: Mock segment generation through a validated provider boundary
-Status: Accepted
+Status: Superseded by ADR-022
+
+Only the draft-only editing/preview and last-completed-save policies are superseded; other decisions remain applicable.
 
 **Context.** Slice 3A needs a key-free end-to-end brief-to-segment path before adding the real Claude SDK, copy generation or streaming. The existing DSL and draft save operation already enforce validation, consent-safe compilation and draft state.
 
@@ -236,3 +240,51 @@ Migration 004 extends the audit call-name allowlist; previous migrations are imm
 **Consequences.** Deltas may be invalid and must be shown as plain text only. Clients use streaming fetch for POST and treat incomplete streams as failure. No resume/history. Mock content is deterministic, not real brief interpretation. Approval must revalidate current audience/content, and SMS encoding warnings, editing and saved messages are deferred. Real Claude partial-tool decoding is not verified by this mock. PostgreSQL queue ADR-006 remains unchanged.
 
 **Verification.** Domain, LLM and real-socket HTTP tests passed, including flushing before completion, disconnect cancellation, repair resets and no validated event on failure. PostgreSQL migration/audit tests passed. Local Postman passed 49 requests and 127 assertions. Deliberately removing city contributions or disabling flushing made the relevant tests fail; both mutations were restored. Actual evidence and sandbox limitations are recorded in README.
+
+## ADR-020: Official Claude SDK behind the existing validated providers
+Status: Accepted
+
+**Context.** Slice 3C replaces mock-only selection with a real Claude adapter while preserving the 3A/3B validators, retry/repair budgets, SSE interface and metadata audit. Secrets must stay out of files/logs; tests must not reach Anthropic.
+
+**Decision.** Pin anthropics/anthropic-sdk-go v1.82.0, verified on the official Go registry against its upstream tag/commit. Only internal/llm imports the SDK; implement both provider interfaces. Production construction explicitly reads model/key from the provided environment accessor, refuses APP_ENV=test before credential lookup, disables SDK environment/profile defaults and tracing, fixes the HTTPS endpoint and disallows redirects. Mock mode remains default. Copy the trusted builder CA bundle into scratch for HTTPS.
+
+Force exactly one named tool with the existing JSON Schema and token bound; disable SDK retries so the existing runner owns retry/repair counts. Reject incomplete/max-token, wrong/missing/multiple tool responses and streams without terminal message_stop. Preserve raw tool JSON through final domain validation. Map provider errors to safe codes, retaining observed token counts in metadata only. Protocol-invalid responses enter the bounded validation repair path; refusals are terminal. No model output becomes SQL or executable code.
+
+Decode provisional string prefixes from bounded input_json_delta data, including escaped text and split surrogate pairs, and reuse the existing SSE attempt/delta/validated/error protocol. Keep the full document cap at 32768 bytes, upstream response cap at 1 MiB, stream-event cap at 8192 and block cap at 16. Re-read the bounded JSON prefix per fragment using encoding/json structure plus a small incomplete-string decoder; this trades CPU for a smaller case-study implementation. Context cancellation and HTTP write failures still stop generation. Real model traffic is opt-in runtime behavior, never part of automated verification.
+
+**Alternatives.** Handwritten HTTP client (violates official-SDK decision); free-text JSON extraction (breaks forced-tool contract); automatic SDK retries layered on runner retries (multiplies cost/calls); buffer until whole fields/messages finish (loses the incremental display behavior); permissive external endpoint overrides (risk of credential leakage).
+
+**Consequences.** SDK dependencies increase module size, but the selected SDK root imports no delivery/cloud-provider SDK. Live model/account availability and performance remain unverified without an explicitly authorized manual smoke test. Local Go HTTP fixtures test the actual SDK and provider path, including failures, rather than stubbing it. Public endpoints, schemas, message preview-only behavior and PostgreSQL queue ADR-006 are unchanged. Do not weaken RULES.md or read .env.
+
+**Verification.** make check, module verification, local SDK HTTP/decoder tests, PostgreSQL regressions and Docker CA-bundle build passed. Mock/test Postman passed 49 requests and 131 assertions with exit 0. Removing the terminal-stop guard made the missing-stop regression fail; source was restored. No real Claude request was made. Actual evidence and limitations are recorded in README.
+
+
+## ADR-021: Compatible forced-tool model configuration
+Status: Accepted
+
+**Context.** Slice 3C examples selected claude-sonnet-5-5 while the adapter forces a named tool. Anthropic documents that Sonnet 5.5 rejects forced tool choice; synthetic fixture-model protocol tests cannot detect model capability mismatches.
+
+**Decision.** Keep forced tools and the provider contract. Change the Compose/template example to claude-sonnet-4-6, whose documented thinking-off configuration supports forced tools. Reject known incompatible Sonnet/Opus 5.5 and Fable/Mythos 5.1 identifiers before looking up credentials. Mock remains the default; no SDK dependency change or live call.
+
+**Alternatives.** Change to auto tool choice/structured outputs (changes the output contract); retain a known-incompatible example (runtime failure).
+
+**Consequences.** This is a documented capability correction, not proof of account/model availability or real API acceptance. Other model identifiers still need explicit compatibility review. Sources: [Sonnet 5.5 changes](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5), [thinking/tool compatibility](https://platform.claude.com/docs/en/build-with-claude/thinking).
+
+**Verification.** TestClaudeIncompatibleModelRejectedBeforeCredentials and TestClaudeConstructorGuard pass locally without network calls.
+
+## ADR-022: Explicit message saves with campaign-wide revisions
+Status: Accepted
+
+**Context.** The case study requires streamed suggestions followed by human preview/editing. Persisting late generation results implicitly could overwrite human edits. Previously draft-only segment writes used last-completed-save semantics (ADR-016/018), and message generation read metadata and audience separately.
+
+**Decision.** Keep generate-messages preview-only. Add explicit complete-set GET/PUT messages, reusing the existing validator against a fresh consent-filtered snapshot in the save transaction. Require a strong campaign revision token on every campaign mutation, including generated segments. Migrations 005/006 introduce monotonic revisions, per-channel template rows and recorded validation metadata; prior migrations stay immutable. Lock the campaign and compare the expected revision before mutation. Increment once per accepted write; reject stale revisions or serialization conflicts without partial writes. No full content history or unverifiable generated/human provenance.
+
+Allow editing and generation in draft/content_ready with a segment. Segment writes retain message text but clear validation metadata and return draft. Valid full-set message saves set content_ready. A repeatable-read GenerationInput captures campaign and audience together, releases its transaction, and returns base_revision with final SSE validation. No locks span LLM calls or SSE. Read templates and metadata from one snapshot. Saving a candidate always uses its captured revision, never an automatically refreshed token.
+
+**Alternatives.** Automatic persistence at stream completion (turns previews into writes and creates commit/connection ambiguity); per-field PATCH or per-channel versions (extra partial-state coordination); candidate jobs/history/tokens (unnecessary for this increment).
+
+**Consequences.** One extra save request gives explicit human selection and one persistence path for generated and edited text. Full-set replacement, campaign revision/status and validation metadata commit atomically. Database shape/readiness constraints supplement domain validation; raw template length ceilings allow placeholder expansion. Profiles and consents are mutable outside campaign revisions, so stored validation is historical. Future approval must still revalidate current membership/content and reject empty audiences. No approval, queue, delivery, worker or frontend is introduced. Provider audit success continues to mean validated provider output, not persisted templates. Caller reconciliation is required after a stale write or lost response.
+
+This supersedes ADR-016/018 editing/preview/concurrent-save policies. ADR-019 preview-only persistence behavior is preserved; its validated event alone never establishes saved content readiness.
+
+**Verification.** Unit/HTTP, PostgreSQL upgrade/rollback/current-audience/concurrency tests and local mock/test Postman passed. Removing the missing-revision guard made its regression fail; the guard was restored before final checks. Actual results are recorded in README.

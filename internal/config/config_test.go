@@ -12,7 +12,7 @@ func TestLoad(t *testing.T) {
 		valid            bool
 	}{
 		{"mock provider", "LLM_PROVIDER", "mock", true},
-		{"unimplemented real provider", "LLM_PROVIDER", "anthropic", false},
+		{"real provider selected", "LLM_PROVIDER", "anthropic", true},
 		{"unknown provider", "LLM_PROVIDER", "other", false},
 		{"llm timeout", "LLM_TIMEOUT", "1s", true},
 		{"invalid llm timeout", "LLM_TIMEOUT", "invalid", false},

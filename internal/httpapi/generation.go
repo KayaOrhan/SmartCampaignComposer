@@ -35,12 +35,21 @@ func registerGeneration(mux *http.ServeMux, store CampaignStore, generator Segme
 			fail(w, segment.Invalid("body_not_allowed", "$"))
 			return
 		}
+		expected, err := requiredRevision(r, id)
+		if err != nil {
+			fail(w, err)
+			return
+		}
 		c, err := store.Get(ctx, id)
 		if err != nil {
 			fail(w, err)
 			return
 		}
-		if c.Status != "draft" {
+		if c.Revision != expected {
+			fail(w, campaign.ErrRevision)
+			return
+		}
+		if !campaign.Editable(c.Status) {
 			fail(w, campaign.ErrState)
 			return
 		}
@@ -61,14 +70,15 @@ func registerGeneration(mux *http.ServeMux, store CampaignStore, generator Segme
 			}
 			return
 		}
-		// PutSegment locks and rechecks draft state after generation. No DB
+		// PutSegment locks and rechecks revision/editable state after generation. No DB
 		// transaction or row lock is held while the model is running.
-		c, err = store.PutSegment(ctx, id, v)
+		c, err = store.PutSegment(ctx, id, expected, v)
 		if err != nil {
 			fail(w, err)
 			return
 		}
-		slog.Info("campaign segment generated", "campaign_id", id)
+		slog.Info("campaign segment generated", "campaign_id", id, "revision", c.Revision)
+		w.Header().Set("ETag", revisionTag(c.ID, c.Revision))
 		writeJSON(w, http.StatusOK, c)
 	})
 }

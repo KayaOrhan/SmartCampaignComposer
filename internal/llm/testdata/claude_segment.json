@@ -1,0 +1,31 @@
+{
+  "id": "msg_fixture",
+  "type": "message",
+  "role": "assistant",
+  "model": "fixture-model",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "tool_fixture",
+      "name": "extract_segment",
+      "input": {
+        "version": 1,
+        "all": [
+          {
+            "field": "city",
+            "op": "in",
+            "value": [
+              "Istanbul"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 11,
+    "output_tokens": 23
+  }
+}

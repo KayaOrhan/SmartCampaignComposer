@@ -23,13 +23,13 @@ type fakeCampaignStore struct {
 func (f *fakeCampaignStore) called(ctx context.Context) { f.calls++; _, f.deadline = ctx.Deadline() }
 func (f *fakeCampaignStore) Create(ctx context.Context, d campaign.Draft) (campaign.Campaign, error) {
 	f.called(ctx)
-	return campaign.Campaign{ID: 1, Brief: d.Brief, Channels: d.Channels, Status: "draft"}, f.err
+	return campaign.Campaign{ID: 1, Revision: 1, Brief: d.Brief, Channels: d.Channels, Status: "draft"}, f.err
 }
 func (f *fakeCampaignStore) Get(ctx context.Context, id int64) (campaign.Campaign, error) {
 	f.called(ctx)
 	return campaign.Campaign{ID: id}, f.err
 }
-func (f *fakeCampaignStore) PutSegment(ctx context.Context, id int64, v segment.Validated) (campaign.Campaign, error) {
+func (f *fakeCampaignStore) PutSegment(ctx context.Context, id, expected int64, v segment.Validated) (campaign.Campaign, error) {
 	f.called(ctx)
 	return campaign.Campaign{ID: id, Segment: v.JSON()}, f.err
 }
@@ -37,6 +37,18 @@ func (f *fakeCampaignStore) Preview(ctx context.Context, id int64, at time.Time)
 	f.called(ctx)
 	f.asOf = at
 	return campaign.Preview{AsOf: at, ByChannel: map[string]campaign.Bounds{}}, f.err
+}
+
+func (f *fakeCampaignStore) GenerationInput(ctx context.Context, id int64, at time.Time) (campaign.Campaign, campaign.Preview, error) {
+	return campaign.Campaign{}, campaign.Preview{}, f.err
+}
+func (f *fakeCampaignStore) GetMessages(ctx context.Context, id int64) (campaign.SavedMessages, error) {
+	f.called(ctx)
+	return campaign.SavedMessages{CampaignID: id, Revision: 1, Status: "draft"}, f.err
+}
+func (f *fakeCampaignStore) PutMessages(ctx context.Context, id, expected int64, body []byte, at time.Time) (campaign.SavedMessages, error) {
+	f.called(ctx)
+	return campaign.SavedMessages{CampaignID: id, Revision: expected + 1, Status: "content_ready"}, f.err
 }
 
 func TestCampaignRoutes(t *testing.T) {
@@ -74,6 +86,7 @@ func TestCampaignRoutes(t *testing.T) {
 			registerCampaigns(mux, store, func() time.Time { return at }, time.Second)
 			r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("If-Match", revisionTag(1, 1))
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, r)
 			if w.Code != tc.status || store.calls != tc.calls {

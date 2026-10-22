@@ -20,6 +20,19 @@ type Messages struct {
 	Email *Email `json:"email,omitempty"`
 }
 
+type MessageValidation struct {
+	Revision int64   `json:"revision"`
+	Audience Preview `json:"audience"`
+}
+
+type SavedMessages struct {
+	CampaignID int64              `json:"campaign_id"`
+	Revision   int64              `json:"revision"`
+	Status     string             `json:"status"`
+	Messages   json.RawMessage    `json:"messages"`
+	Validation *MessageValidation `json:"validation"`
+}
+
 // ValidatedMessages keeps validated templates immutable outside this package.
 type ValidatedMessages struct{ canonical json.RawMessage }
 

@@ -118,6 +118,9 @@ func runCall[T any](ctx context.Context, id int64, name, version string, timeout
 			switch {
 			case ctx.Err() != nil || errors.Is(callErr, context.DeadlineExceeded) || errors.Is(callErr, context.Canceled):
 				outcome = "llm_timeout"
+			case errors.Is(callErr, errProviderOutput):
+				outcome = "llm_output_invalid"
+				reasons = []segment.ValidationError{{Code: "invalid_tool_response", Path: "$"}}
 			case callErr != nil:
 				outcome = "llm_unavailable"
 				retry = errors.Is(callErr, ErrRateLimited) || errors.Is(callErr, ErrTransient)

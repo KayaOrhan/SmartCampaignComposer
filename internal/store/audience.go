@@ -11,18 +11,36 @@ import (
 )
 
 func (s Campaigns) Preview(ctx context.Context, id int64, asOf time.Time) (result campaign.Preview, resultErr error) {
+	_, result, resultErr = s.GenerationInput(ctx, id, asOf)
+	return
+}
+
+// GenerationInput reads campaign metadata and audience under one snapshot.
+// The transaction ends before generation starts.
+func (s Campaigns) GenerationInput(ctx context.Context, id int64, asOf time.Time) (c campaign.Campaign, result campaign.Preview, resultErr error) {
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
-		return result, ErrUnavailable
+		return c, result, ErrUnavailable
 	}
 	defer finishTx(tx, &resultErr)
-	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1`, id))
+	c, err = readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1`, id))
 	if err != nil {
-		return result, err
+		return c, result, err
 	}
-	if c.Status != "draft" {
+	result, err = previewInTx(ctx, tx, c, asOf)
+	if err != nil {
+		return c, result, err
+	}
+	if err := tx.Commit(); err != nil {
+		return c, result, databaseError(err)
+	}
+	return c, result, nil
+}
+
+func previewInTx(ctx context.Context, tx *sql.Tx, c campaign.Campaign, asOf time.Time) (result campaign.Preview, resultErr error) {
+	if !campaign.Editable(c.Status) {
 		return result, campaign.ErrState
 	}
 	if len(c.Segment) == 0 {
@@ -66,8 +84,5 @@ func (s Campaigns) Preview(ctx context.Context, id int64, asOf time.Time) (resul
 		result.ByChannel[channel] = bounds
 	}
 	result.EligibleUnique = len(unique)
-	if err := tx.Commit(); err != nil {
-		return result, ErrUnavailable
-	}
 	return result, nil
 }

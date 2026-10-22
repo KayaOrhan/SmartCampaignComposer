@@ -1,6 +1,6 @@
 # Smart Campaign Composer
 
-Slices 1, 2, 3A and 3B implement the Go/PostgreSQL foundation, campaign drafts, fake seed data, validated audience previews and mock segment/message generation with SSE previews. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
+Slices 1, 2, 3A, 3B, 3C and 3D implement the Go/PostgreSQL foundation, fake seed data, validated audience previews, segment/message generation, revision-conditional template persistence and human editing. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
 
 ## Run
 
@@ -22,7 +22,7 @@ docker compose down
 
 Configuration uses environment variables only: `DATABASE_URL` (required), `HTTP_ADDR` (default `:8080`), `DB_TIMEOUT` (default `2s`, maximum `30s`), and `SEED_DATA` (default `false`, accepts only `true`/`false`). Names appear in `.env.example`. Compose enables seeding: startup transactionally inserts 5000 fake users, per-channel consents, carts and orders once. Emails use `@example.test`; phone values are non-dialable identifiers. Subsequent startup preserves data and consent edits. The recorded seed reference time stays fixed, so development events age naturally.
 
-No dotenv loader is used. Later Claude integration must accept `ANTHROPIC_API_KEY` supplied by Compose from user configuration; agents must never inspect that file.
+No dotenv loader is used. Compose passes explicitly configured `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` to the API in Anthropic mode; agents never inspect `.env`. Mock mode remains the default.
 
 ## Campaign API
 
@@ -30,12 +30,14 @@ No dotenv loader is used. Later Claude integration must accept `ANTHROPIC_API_KE
 | --- | --- | --- |
 | `POST /campaigns` | JSON `brief` and `channels` | 201 draft plus Location header |
 | `GET /campaigns/{id}` | No body | 200 stored campaign |
-| `PUT /campaigns/{id}/segment` | Segment DSL JSON | 200 updated draft |
-| `POST /campaigns/{id}/generate-segment` | No body | 200 updated draft with validated mock segment |
+| `PUT /campaigns/{id}/segment` | Segment DSL JSON, required If-Match | 200 updated draft |
+| `POST /campaigns/{id}/generate-segment` | No body, required If-Match | 200 updated draft with validated segment |
 | `POST /campaigns/{id}/generate-messages` | No body | 200 SSE message preview; details below |
 | `POST /campaigns/{id}/audience-preview` | No body | 200 aggregate preview |
+| `GET /campaigns/{id}/messages` | No body | 200 saved templates or messages=null |
+| `PUT /campaigns/{id}/messages` | JSON messages envelope, required If-Match | 200 saved, revalidated content_ready templates |
 
-Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segments can only be changed on drafts. There is no message persistence, approval or send endpoint yet. Preview without a segment returns 409.
+Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segment and content changes are allowed in draft/content_ready only. Preview without a segment returns 409. Approval and sending are not implemented.
 
 Example segment:
 
@@ -47,7 +49,37 @@ The [campaign-domain skill](.claude/skills/campaign-domain/SKILL.md) specifies a
 
 Preview returns `as_of`, `eligible_unique` (the union across selected channels), and `by_channel` with `count`, `max_first_name_runes` and `max_city_runes`. Both maxima are independent, even when different recipients supply them. No recipient rows or contact details are returned. A repeatable-read transaction keeps channel counts consistent; this is not an approval snapshot.
 
-Requests containing JSON require Content-Type `application/json`. Validation rejects duplicate or unknown keys, wrong types, invalid UTF-8 and trailing values. Error responses have the form `{"error":{"code":"unsupported_field","path":"all[0].field"}}`, without echoing submitted values or driver errors. Statuses: 400 malformed JSON, 413 oversized body, 422 invalid contract, 404 missing campaign, 409 invalid state/missing segment, 503 database unavailable.
+Requests containing JSON require Content-Type `application/json`. Validation rejects duplicate or unknown keys, wrong types, invalid UTF-8 and trailing values. Error responses have the form `{"error":{"code":"unsupported_field","path":"all[0].field"}}`, without echoing submitted values or driver errors. Statuses: 400 malformed JSON/revision token, 413 oversized body, 422 invalid contract, 404 missing campaign, 409 invalid state/missing segment/concurrent transaction, 412 stale revision, 428 missing revision precondition, 503 database unavailable.
+
+## Saved messages and editing (3D)
+
+Generate -> validate preview -> explicitly save -> retrieve/edit -> revalidate -> content_ready. A validated SSE event is neither persistence nor approval. Its base_revision identifies the coherent campaign/audience snapshot used for generation. Generation can run from draft or content_ready; it never changes stored text, status or revision. The provider interfaces and bounded audit/retry/repair runner are unchanged.
+
+Campaigns start at revision 1. Create/get/segment-write responses include revision and an ETag such as `"campaign-42-r7"`. Message responses expose campaign_id, revision, status, messages and validation, with the same campaign concurrency token in ETag. Each successful segment/message write increments revision once, even when resubmitting the same text. Supply exactly one strong token for the target campaign in If-Match on PUT segment/messages and POST generate-segment. Wildcards, weak tokens, lists and noncanonical/overflowing values are rejected. A stale write returns 412 campaign_revision_conflict; a missing precondition returns 428 revision_required. A PostgreSQL serialization conflict returns 409 concurrent_update. Fetch and reconcile; never automatically attach a fresh token to old generated or edited content.
+
+To save a preview or human edit, send the complete selected-channel set:
+
+```http
+PUT /campaigns/42/messages
+Content-Type: application/json
+If-Match: "campaign-42-r7"
+
+{"messages":{"sms":{"body":"Merhaba {{first_name}}!"},"email":{"subject":"Offer","body":"An offer for {{city}}."}}}
+```
+
+Success returns HTTP 200:
+
+```json
+{"campaign_id":42,"revision":8,"status":"content_ready","messages":{"sms":{"body":"Merhaba {{first_name}}!"},"email":{"subject":"Offer","body":"An offer for {{city}}."}},"validation":{"revision":8,"audience":{"as_of":"2026-10-22T09:11:00Z","eligible_unique":2,"by_channel":{"sms":{"count":2,"max_first_name_runes":10,"max_city_runes":12},"email":{"count":2,"max_first_name_runes":10,"max_city_runes":12}}}}}
+```
+
+Counts/timestamps above are illustrative. For a generated candidate, construct If-Match from its base_revision, not from a later campaign read. GET messages returns the same saved representation; before any save, messages and validation are null. After a segment change, messages retain their exact text, validation becomes null and status becomes draft. Explicitly PUT the retained or edited set again to revalidate it. Invalid/stale saves preserve the entire previous set, validation metadata, status and revision.
+
+PutMessages uses a short repeatable-read transaction: lock campaign, compare revision, compute current consent-filtered audience bounds, reuse ValidateMessages, replace all channel rows, store the validation preview, increment revision and set content_ready, then commit. GetMessages reads campaign, templates and recorded validation in one repeatable-read snapshot. GenerationInput reads campaign and audience together, closes its transaction, then calls the provider. Generated segment saves compare the original revision again after generation. No transaction or lock spans an LLM request or SSE connection.
+
+Migrations 005/006 add monotonic revisions, template rows and validation metadata; prior migrations remain unchanged. SQL constraints protect channel/subject shape and readiness metadata. Raw template ceilings account for repeated placeholders; rendered limits remain enforced in Go against both independent audience maxima. No generated/human provenance or full content history is claimed. content_ready records successful content validation, including schema-bound empty-channel previews; future approval must revalidate current audience/content and reject an empty audience. Profile/consent changes do not advance campaign revision or turn the stored validation preview into an approval snapshot.
+
+See [postman/README.md](postman/README.md) for the local generate/save/edit/revalidate walkthrough.
 
 ## Tests and checks
 
@@ -98,7 +130,9 @@ Make is now available. Race testing remains blocked by missing CGO/compiler supp
 
 ## Known gaps
 
-- Real Claude, message persistence/editing/approval, mock delivery provider, worker, metrics and Vue are not implemented yet. The mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs. Final Compose startup must also include the mock provider.
+- Approval, mock delivery provider, worker, metrics and Vue are not implemented yet. The Claude adapter is tested against local protocol fixtures; live model access, latency and account-specific compatibility remain unverified. The mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs. Final Compose startup must also include the mock provider.
+- Revisions protect campaign writes, not mutable profiles/consents; validation snapshots are historical. Full content history, authenticated editor identity and generated-content provenance are absent. A lost save response requires GET/reconciliation, not blind retry with a fresh revision.
+- SDK malformed SSE event-envelope JSON currently maps to unavailable rather than the tool-validation repair path. Transient retries use a fixed 100 ms delay; up to six provider attempts share one generation deadline. Real-model repair effectiveness and timing remain unverified.
 - PostgreSQL remains the queue choice (ADR-006).
 - Local race testing lacks a CGO compiler.
 - Secret scanning detects common formats, not all possible secrets. Claude hooks and session scrubbing remain unverified.
@@ -126,9 +160,11 @@ Safety coverage: Rule 1 and boundary validation are exercised by `TestValidation
 
 ## Mock brief-to-segment (3A)
 
+The 3A-3C sections record their original slice behavior and verification. Current revision preconditions, editable states and persistence contracts are defined above in Campaign API and Saved messages and editing.
+
 POST `/campaigns/{id}/generate-segment` with no body uses the stored draft brief and replaces its segment only after successful validation and call recording. The response is the same campaign representation as GET. Repeat calls keep the same deterministic segment; each invocation creates fresh call records. Concurrent draft edits use last completed save; draft state is rechecked under lock at save time. There is no database lock held during generation. Preview remains a separate request.
 
-`LLM_PROVIDER` defaults to `mock`; other providers fail startup, including `anthropic` under `APP_ENV=test`. No API key is needed or read by this implementation. `LLM_TIMEOUT` defaults to `10s` and must be positive and at most `30s`; it bounds the entire generation sequence. `LLM_MOCK_SCENARIO` defaults to `happy`; supported segment scenarios are `happy`, `unknown_field`, `extra_keys`, `no_tool_use`, `refusal`, `timeout`, `rate_limited`, `repair_succeeds` and `repair_exhausted`. These are startup/test controls, never request fields. Compose selects `happy`. The mock returns fixtures independently of brief wording; it is a test adapter, not a language parser.
+`LLM_PROVIDER` defaults to `mock`; `anthropic` selects the 3C adapter and is refused under `APP_ENV=test`. No key is needed or read in mock mode. `LLM_TIMEOUT` defaults to `10s` and must be positive and at most `30s`; it bounds the entire generation sequence. `LLM_MOCK_SCENARIO` defaults to `happy`; supported segment scenarios are `happy`, `unknown_field`, `extra_keys`, `no_tool_use`, `refusal`, `timeout`, `rate_limited`, `repair_succeeds` and `repair_exhausted`. These are startup/test controls, never request fields. Compose selects `happy`. The mock returns fixtures independently of brief wording; it is a test adapter, not a language parser.
 
 The provider interface receives the versioned prompt, forced tool name, schema, token bound and safe validation feedback. Every tool input goes through the existing strict DSL validator. There are at most two validation repairs and one transport retry per attempt for rate-limit/transient failures, with bounded backoff. No model output is executed. Failed output or refusal returns 502; timeout/cancellation returns 504; unavailable provider or audit storage returns 503. Validation exhaustion adds `error.reasons`, an array of safe code/path pairs. No raw model/driver error is returned. Failures preserve the previous segment.
 
@@ -180,3 +216,53 @@ go test -mod=readonly ./...
 Go packages passed without an API key. Real-socket HTTP tests separately proved flushing before provider completion and disconnect cancellation. The initial sandbox run blocked loopback connections; the same tests passed with approved local-network execution. No tests were skipped. A deliberate omission of city maxima failed SMS, repeated-variable, subject, email-body and zero-count bound tests. Disabling Flush failed `TestSSEFlushesBeforeGenerationCompletes` with a client timeout awaiting headers; sources were restored before final checks.
 
 Safety coverage: message boundary/length rules are covered by `TestMessageValidation`; Rule 1 and strict output/repair boundaries by `TestMockMessageScenarios`, existing segment tests and the shared runner; Rule 3 by the existing consent-aware `TestDomain`; Rule 5 by metadata-only call records, safe error payloads and repository scanning; Rule 6 by the mock-only provider guard and key-free tests; Rule 9 by both deliberate failing controls. Cancellation, transport errors and preview-only state are exercised by the HTTP and PostgreSQL tests. No dependency, real external API, recipient contact output, message persistence, approval or delivery was introduced. Race testing remains blocked by the existing missing CGO compiler.
+
+## Claude adapter (3C)
+
+The existing generation endpoints select a provider at startup. Default `LLM_PROVIDER=mock` remains key-free. To opt into Claude, supply `LLM_PROVIDER=anthropic`, `ANTHROPIC_MODEL` and `ANTHROPIC_API_KEY` through your runtime environment or private local Compose configuration, then rebuild/recreate the API. Use `APP_ENV=development` or `production`; construction under `APP_ENV=test` is rejected before looking up a credential. No model/key is required in mock mode. `LLM_TIMEOUT` bounds each complete generation sequence as before; slower live calls may need a larger value up to 30s. No live Claude call is made by the documented automated tests.
+
+Only internal/llm imports the official SDK. Version 1.82.0 was verified through proxy.golang.org metadata: its origin is anthropics/anthropic-sdk-go, tag v1.82.0, commit 543d266ce81a4487281e084b013fef807dbb5f18 (2026-10-15). The upstream-pinned transitive modules and checksums are recorded in go.mod/go.sum; no cloud-provider SDK is imported by application code. Disable SDK environment/profile credential discovery and OpenTelemetry content tracing. The adapter reads only the explicitly supplied environment key and fixes the endpoint to HTTPS api.anthropic.com; it ignores ambient SDK base-URL/auth/profile/custom-header settings and refuses redirects. Never log or print the key, SDK errors, HTTP dumps or resolved Compose configuration. The scratch image includes the CA certificate bundle from the pinned Go builder image.
+
+Each request supplies exactly one forced tool, the versioned schema, a token bound and safe validator feedback. Disable SDK retries to preserve the runner's one transient retry per validation attempt and at most two repairs. Nonstreaming segments accept exactly one expected tool block with tool_use stop reason. Message streams require ordered blocks, one expected tool, completed input, and terminal message_stop; max_tokens, missing/wrong/multiple tools and malformed/truncated streams cannot produce a validated result. Refusals remain terminal; 429, 5xx and overloaded errors follow the existing bounded retry path. Error bodies and raw SDK errors are discarded; audit rows receive observed token counts and safe outcome codes.
+
+Tool JSON deltas are accumulated within 32768 bytes. The decoder emits only provisional sms.body/email.subject/email.body string prefixes, handling escaped quotes, split Unicode escapes and surrogate pairs. Full raw input is preserved for final strict domain validation, so canonicalization never hides duplicate keys. Only final validated payloads can be used as complete previews; no message persistence or approval was added. The decoder rereads a bounded prefix per upstream delta, appropriate for this case study's small document limit. HTTP responses are limited to 1 MiB, recognized stream events to 8192, and content blocks to 16, with context/write deadlines retained.
+
+SDK tests use private local HTTP servers and fake credentials, rather than replacing SDK methods with stubs. They exercise actual request serialization, streaming consumption, cancellation, retries, repairs, refusal/truncation and token accounting. Test fixtures are synthetic and follow Anthropic's documented Messages/SSE protocol, not recordings from a real account. These establish local protocol compatibility; they do not establish that the configured live model or key is available. Postman continues to run only against the mock/test Compose API, with no external Claude request. No new endpoints, API response fields or migrations were required.
+
+### 3C verification (2026-10-22)
+
+Executed successfully: `make check`; `go mod verify` (`all modules verified`); local SDK/decoder tests; `make test-integration` against disposable PostgreSQL; mock/test Compose rebuild including the CA certificate copy; and the documented local Postman run. Postman passed 49 requests and 131 assertions, zero failures, exit 0. The API was explicitly launched with LLM_PROVIDER=mock and APP_ENV=test, with any inherited key cleared without reading it. No real Anthropic call or real credential was used.
+
+Actual check output included:
+
+```text
+repository safety and formatting checks passed
+go vet -mod=readonly ./...
+go test -mod=readonly ./...
+all modules verified
+```
+
+The Go packages passed. Tests exercised actual SDK HTTP requests to local synthetic servers, not SDK method stubs: forced tool/model/token/schema serialization, safe feedback repairs, exact retry/audit counts, 400/401/403/429/500/529 failures, stream-overload events, refusal, missing/wrong/multiple tools, duplicate JSON keys, max-token/truncated/missing-stop streams, token counts, timeouts and cancellation after a display delta. Decoder tests cover byte-by-byte fragments, quotes/backslashes/newlines, UTF-8, split Unicode escapes/surrogates, duplicate fields, unknown display paths and document bounds. An intentional removal of the final terminal-stop rejection made `TestClaudeStreamTruncationAndErrors/missing_stop` fail with `bad stream accepted <nil>`; the source was restored before final checks.
+
+Rule 1/boundary validation is covered by SDK invalid-output tests plus existing DSL/message validators; Rule 5 by SDK error redaction, explicit credentials/destination bounds, disabled environment/profile loading and tracing, and metadata-only audit rows; Rule 6 by independent config and constructor guards (before key lookup), fake local fixtures and mock/test Postman; Rule 8 by registry/tag origin, pinned module/checksums and `go mod verify`; Rule 9 by the deliberate failing terminal-stop control. Existing consent and repeat-safe storage tests passed. A dependency-graph inspection found no cloud-provider SDK imports in the API. No RULES.md changes, real delivery, commits or new public endpoints/migrations were introduced.
+
+During verification, the first cancellation fixture did not consume its request body and could hang awaiting disconnect; the fixture was fixed to drain it, and now asserts a display delta preceded cancellation. An interrupted test process was checked and none remained. Sandbox network/cache restrictions required approved local-network/module-cache execution; tests were not skipped. Race testing remains blocked by the existing missing CGO compiler. Live model/key availability, public TLS connectivity, account permissions and production latency remain unverified.
+
+
+## Slice 3D verification (2026-10-22)
+
+Implemented and checked incrementally: separate compatible-model correction, campaign revisions/conditional segment writes, then message persistence/editing and coherent streaming snapshots. Existing uncommitted Slice 3C work was preserved. No new dependency, RULES.md change, commit, real Anthropic call, approval or delivery functionality.
+
+Executed make check successfully after implementation and the restored deliberate failure control:
+
+```text
+repository safety and formatting checks passed
+go vet -mod=readonly ./...
+go test -mod=readonly ./...
+```
+
+The Docker PostgreSQL suite passed against guarded scc_test, including migrations from 004 with an existing draft, repeat/rollback, competing segment writes, message/edit versus segment races, all-or-nothing replacement, invalid/stale rejection, current profile/consent bounds, single channels, cancellation and preserved text with invalidated readiness. A raw 2240-character placeholder SMS that renders to 160 characters persisted and round-tripped successfully. Existing domain/LLM/audit/seed regressions remained green. The Compose mock/test API rebuilt and applied migrations 005/006. Final Postman execution passed 74 requests and 176 assertions, zero failures, exit 0, including regeneration from content_ready; reporting stayed local.
+
+TestRevisionPreconditions failed with `wrong precondition error <nil>` after temporarily accepting a missing If-Match header. The source was restored; final checks passed. Initial sandbox loopback failures were rerun with approved local access, without skipping tests. Race-detector execution remains unavailable with the existing missing CGO compiler; synchronized PostgreSQL concurrency tests did execute. No real model/account compatibility is claimed.
+
+Rules 1/3 and rendered-bound validation are exercised by existing TestDomain/TestLLMOutputNeverReachesSQL plus TestMessageSaveUsesCurrentAudienceBounds. Strict write/revision/state boundaries are exercised by TestMessagePersistenceHTTP, TestRevisionPreconditions, TestSlowGeneratedSegmentCannotOverwriteEdit, TestSavedMessagesLifecycle and PostgreSQL concurrency/rollback tests. Rules 5/7 remain supported by safe errors, metadata-only logs, the repository scanner and explicit safe Compose template. Rule 6 remains protected by mock/test mode and constructor/config guards. Rule 9 is supported by the deliberate failing precondition control.

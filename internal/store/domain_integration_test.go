@@ -18,6 +18,15 @@ import (
 	"github.com/KayaOrhan/SmartCampaignComposer/seed"
 )
 
+func putTestSegment(t *testing.T, repo Campaigns, ctx context.Context, id int64, v segment.Validated) (campaign.Campaign, error) {
+	t.Helper()
+	c, err := repo.Get(ctx, id)
+	if err != nil {
+		return campaign.Campaign{}, err
+	}
+	return repo.PutSegment(ctx, id, c.Revision, v)
+}
+
 func TestDomain(t *testing.T) {
 	db, ctx := testDatabase(t)
 	if err := Migrate(ctx, db, 5*time.Second); err != nil {
@@ -84,10 +93,10 @@ func TestDomain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+	if _, err := putTestSegment(t, repo, ctx, c.ID, v); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+	if _, err := putTestSegment(t, repo, ctx, c.ID, v); err != nil {
 		t.Fatal("repeat segment update:", err)
 	}
 	stored, err := repo.Get(ctx, c.ID)
@@ -108,7 +117,7 @@ func TestDomain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.PutSegment(ctx, c.ID, injected); err != nil {
+	if _, err := putTestSegment(t, repo, ctx, c.ID, injected); err != nil {
 		t.Fatal(err)
 	}
 	injectedPreview, err := repo.Preview(ctx, c.ID, asOf)
@@ -123,21 +132,21 @@ func TestDomain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.PutSegment(ctx, c.ID, recent); err != nil {
+	if _, err := putTestSegment(t, repo, ctx, c.ID, recent); err != nil {
 		t.Fatal(err)
 	}
 	recentPreview, err := repo.Preview(ctx, c.ID, asOf)
 	if err != nil || recentPreview.EligibleUnique != 1 {
 		t.Fatal("purchase window boundaries incorrect")
 	}
-	if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+	if _, err := putTestSegment(t, repo, ctx, c.ID, v); err != nil {
 		t.Fatal(err)
 	}
 	smsOnly, err := repo.Create(ctx, campaign.Draft{Brief: "single channel", Channels: []string{"sms"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.PutSegment(ctx, smsOnly.ID, v); err != nil {
+	if _, err := putTestSegment(t, repo, ctx, smsOnly.ID, v); err != nil {
 		t.Fatal(err)
 	}
 	single, err := repo.Preview(ctx, smsOnly.ID, asOf)
@@ -155,7 +164,7 @@ func TestDomain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.PutSegment(ctx, c.ID, empty); err != nil {
+	if _, err := putTestSegment(t, repo, ctx, c.ID, empty); err != nil {
 		t.Fatal(err)
 	}
 	p, err = repo.Preview(ctx, c.ID, asOf)
@@ -168,7 +177,7 @@ func TestDomain(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE app.campaigns SET status='approved' WHERE id=$1`, c.ID); err != nil {
 		t.Fatal("state fixture failed")
 	}
-	if _, err := repo.PutSegment(ctx, c.ID, v); !errors.Is(err, campaign.ErrState) {
+	if _, err := putTestSegment(t, repo, ctx, c.ID, v); !errors.Is(err, campaign.ErrState) {
 		t.Fatal("non-draft segment editable")
 	}
 	if _, err := repo.Preview(ctx, c.ID, asOf); !errors.Is(err, campaign.ErrState) {
@@ -219,7 +228,7 @@ func TestGeneratedSegmentPersistenceAndAudit(t *testing.T) {
 				t.Fatal("unexpected generation outcome", err)
 			}
 			if err == nil {
-				if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+				if _, err := putTestSegment(t, repo, ctx, c.ID, v); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -305,7 +314,7 @@ func TestMessageGenerationAuditAndPreviewOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+	if _, err := putTestSegment(t, repo, ctx, c.ID, v); err != nil {
 		t.Fatal(err)
 	}
 	// With no recipients, validation uses schema maxima for each empty channel.
@@ -422,7 +431,7 @@ func TestSegmentPersistenceRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+			if _, err := putTestSegment(t, repo, ctx, c.ID, v); err != nil {
 				t.Fatal("initial save", err)
 			}
 			if tc.jsonbExpansion {
@@ -442,7 +451,7 @@ func TestSegmentPersistenceRoundTrip(t *testing.T) {
 			if err != nil || p.EligibleUnique != 0 || len(p.ByChannel) != 2 {
 				t.Fatal("preview failed", err)
 			}
-			if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+			if _, err := putTestSegment(t, repo, ctx, c.ID, v); err != nil {
 				t.Fatal("repeat save", err)
 			}
 		})

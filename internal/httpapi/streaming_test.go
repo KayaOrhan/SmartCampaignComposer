@@ -27,6 +27,15 @@ func (s *streamStore) Preview(ctx context.Context, id int64, at time.Time) (camp
 	return p, s.previewErr
 }
 
+func (s *streamStore) GenerationInput(ctx context.Context, id int64, at time.Time) (campaign.Campaign, campaign.Preview, error) {
+	c, err := s.Get(ctx, id)
+	if err != nil {
+		return c, campaign.Preview{}, err
+	}
+	p, err := s.Preview(ctx, id, at)
+	return c, p, err
+}
+
 type streamRecorder struct{ calls []llm.Call }
 
 func (r *streamRecorder) RecordLLMCall(ctx context.Context, c llm.Call) error {
@@ -37,7 +46,7 @@ func (r *streamRecorder) RecordLLMCall(ctx context.Context, c llm.Call) error {
 	return nil
 }
 func streamFixture() *streamStore {
-	return &streamStore{generationStore: generationStore{current: campaign.Campaign{ID: 1, Brief: "synthetic brief", Channels: []string{"sms", "email"}, Status: "draft", Segment: json.RawMessage(`{"version":1,"all":[{"field":"city","op":"in","value":["istanbul"]}]}`)}}, preview: campaign.Preview{EligibleUnique: 2, ByChannel: map[string]campaign.Bounds{"sms": {Count: 2, MaxFirstName: 10, MaxCity: 12}, "email": {Count: 2, MaxFirstName: 10, MaxCity: 12}}}}
+	return &streamStore{generationStore: generationStore{current: campaign.Campaign{ID: 1, Revision: 1, Brief: "synthetic brief", Channels: []string{"sms", "email"}, Status: "draft", Segment: json.RawMessage(`{"version":1,"all":[{"field":"city","op":"in","value":["istanbul"]}]}`)}}, preview: campaign.Preview{EligibleUnique: 2, ByChannel: map[string]campaign.Bounds{"sms": {Count: 2, MaxFirstName: 10, MaxCity: 12}, "email": {Count: 2, MaxFirstName: 10, MaxCity: 12}}}}
 }
 func streamClock() time.Time { return time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC) }
 
@@ -82,6 +91,7 @@ func TestMessageStreamEvents(t *testing.T) {
 					Attempt              int
 					Channel, Field, Text string
 					Messages             map[string]map[string]string
+					BaseRevision         int64 `json:"base_revision"`
 					Audience             campaign.Preview
 					Error                *llm.Error
 				}
@@ -102,7 +112,7 @@ func TestMessageStreamEvents(t *testing.T) {
 					text[event.Channel+"."+event.Field] += event.Text
 				case "validated":
 					finals++
-					if i != len(frames)-1 || event.Attempt != attempt || !event.Audience.AsOf.Equal(streamClock()) {
+					if i != len(frames)-1 || event.Attempt != attempt || event.BaseRevision != 1 || !event.Audience.AsOf.Equal(streamClock()) {
 						t.Fatal("final order or preview clock")
 					}
 					for channel, fields := range event.Messages {

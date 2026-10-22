@@ -40,13 +40,24 @@ func run(ctx context.Context, logger *slog.Logger) (result error) {
 	if err != nil {
 		return err
 	}
-	mock, err := llm.NewMock(cfg.LLMMockScenario)
-	if err != nil {
-		return err
-	}
-	messageMock, err := llm.NewMessageMock(cfg.LLMMockMessageScenario, cfg.LLMMockChunkDelay)
-	if err != nil {
-		return err
+	var segmentProvider llm.Provider
+	var messageProvider llm.MessageProvider
+	if cfg.LLMProvider == "anthropic" {
+		real, err := llm.NewAnthropic(os.Getenv, cfg.LLMTimeout)
+		if err != nil {
+			return err
+		}
+		segmentProvider, messageProvider = real, real
+	} else {
+		mock, err := llm.NewMock(cfg.LLMMockScenario)
+		if err != nil {
+			return err
+		}
+		messageMock, err := llm.NewMessageMock(cfg.LLMMockMessageScenario, cfg.LLMMockChunkDelay)
+		if err != nil {
+			return err
+		}
+		segmentProvider, messageProvider = mock, messageMock
 	}
 	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBTimeout)
 	if err != nil {
@@ -66,7 +77,7 @@ func run(ctx context.Context, logger *slog.Logger) (result error) {
 		}
 	}
 	repo := store.Campaigns{DB: db, Timeout: cfg.DBTimeout}
-	srv := &http.Server{Addr: cfg.Address, Handler: httpapi.Handler(db.PingContext, cfg.DBTimeout, repo, llm.SegmentGenerator{Provider: mock, Recorder: repo, Timeout: cfg.LLMTimeout}, llm.MessageGenerator{Provider: messageMock, Recorder: repo, Timeout: cfg.LLMTimeout}, cfg.LLMTimeout+2*cfg.DBTimeout), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: cfg.LLMTimeout + 2*cfg.DBTimeout + 5*time.Second, IdleTimeout: 60 * time.Second}
+	srv := &http.Server{Addr: cfg.Address, Handler: httpapi.Handler(db.PingContext, cfg.DBTimeout, repo, llm.SegmentGenerator{Provider: segmentProvider, Recorder: repo, Timeout: cfg.LLMTimeout}, llm.MessageGenerator{Provider: messageProvider, Recorder: repo, Timeout: cfg.LLMTimeout}, cfg.LLMTimeout+2*cfg.DBTimeout), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: cfg.LLMTimeout + 2*cfg.DBTimeout + 5*time.Second, IdleTimeout: 60 * time.Second}
 	stopped := make(chan error, 1)
 	go func() { stopped <- srv.ListenAndServe() }()
 	logger.Info("api starting", "address", cfg.Address)
