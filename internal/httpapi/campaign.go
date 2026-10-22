@@ -25,6 +25,9 @@ type CampaignStore interface {
 	GenerationInput(context.Context, int64, time.Time) (campaign.Campaign, campaign.Preview, error)
 	GetMessages(context.Context, int64) (campaign.SavedMessages, error)
 	PutMessages(context.Context, int64, int64, []byte, time.Time) (campaign.SavedMessages, error)
+	ApprovalPreview(context.Context, int64, time.Time) (campaign.ApprovalPreview, error)
+	Approve(context.Context, int64, int64, string, time.Time) (campaign.DeliveryStatus, error)
+	GetDeliveryStatus(context.Context, int64) (campaign.DeliveryStatus, error)
 }
 
 type campaignAPI struct {
@@ -47,6 +50,8 @@ func registerCampaigns(mux *http.ServeMux, store CampaignStore, now func() time.
 	mux.HandleFunc("POST /campaigns/{id}/audience-preview", bounded(a.preview))
 	mux.HandleFunc("GET /campaigns/{id}/messages", bounded(a.getMessages))
 	mux.HandleFunc("PUT /campaigns/{id}/messages", bounded(a.putMessages))
+	mux.HandleFunc("POST /campaigns/{id}/approve", bounded(a.approve))
+	mux.HandleFunc("GET /campaigns/{id}/delivery-status", bounded(a.deliveryStatus))
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -86,6 +91,8 @@ func fail(w http.ResponseWriter, err error) {
 		code, status = "invalid_campaign_state", 409
 	case errors.Is(err, campaign.ErrSegmentRequired):
 		code, status = "segment_required", 409
+	case errors.Is(err, campaign.ErrEmptyAudience):
+		code, status = "empty_audience", 409
 	}
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "path": path}})
 }
@@ -207,11 +214,12 @@ func (a campaignAPI) preview(w http.ResponseWriter, r *http.Request) {
 		fail(w, segment.Invalid("body_not_allowed", "$"))
 		return
 	}
-	p, err := a.store.Preview(r.Context(), id, a.now().UTC())
+	p, err := a.store.ApprovalPreview(r.Context(), id, a.now().UTC())
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	w.Header().Set("ETag", revisionTag(id, p.Revision))
 	writeJSON(w, 200, p)
 }
 

@@ -15,6 +15,7 @@ var ErrState = errors.New("campaign state does not allow this operation")
 var ErrSegmentRequired = errors.New("campaign segment required")
 var ErrRevision = errors.New("campaign revision conflict")
 var ErrConcurrentUpdate = errors.New("concurrent campaign update")
+var ErrEmptyAudience = errors.New("campaign audience is empty")
 
 func Editable(status string) bool { return status == "draft" || status == "content_ready" }
 

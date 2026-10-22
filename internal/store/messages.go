@@ -21,6 +21,18 @@ func (s Campaigns) GetMessages(ctx context.Context, id int64) (result campaign.S
 	if err != nil {
 		return result, err
 	}
+	result, err = messagesInTx(ctx, tx, c)
+	if err != nil {
+		return result, err
+	}
+	if err := tx.Commit(); err != nil {
+		return result, databaseError(err)
+	}
+	return result, nil
+}
+
+func messagesInTx(ctx context.Context, tx *sql.Tx, c campaign.Campaign) (result campaign.SavedMessages, resultErr error) {
+	id := c.ID
 	result = campaign.SavedMessages{CampaignID: id, Revision: c.Revision, Status: c.Status}
 	var revision sql.NullInt64
 	var preview []byte
@@ -82,9 +94,6 @@ func (s Campaigns) GetMessages(ctx context.Context, id int64) (result campaign.S
 		result.Messages = v.JSON()
 	} else if result.Validation != nil {
 		return result, ErrUnavailable
-	}
-	if err := tx.Commit(); err != nil {
-		return result, databaseError(err)
 	}
 	return result, nil
 }

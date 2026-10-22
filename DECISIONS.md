@@ -288,3 +288,17 @@ Allow editing and generation in draft/content_ready with a segment. Segment writ
 This supersedes ADR-016/018 editing/preview/concurrent-save policies. ADR-019 preview-only persistence behavior is preserved; its validated event alone never establishes saved content readiness.
 
 **Verification.** Unit/HTTP, PostgreSQL upgrade/rollback/current-audience/concurrency tests and local mock/test Postman passed. Removing the missing-revision guard made its regression fail; the guard was restored before final checks. Actual results are recorded in README.
+
+## ADR-023: Reviewed approval and atomic PostgreSQL enqueueing
+
+Status: Accepted (2026-10-22).
+
+**Context.** Saved content readiness is historical validation, not an approved audience. Campaign revisions cannot detect mutable profile/consent changes. The original approval and deliveries milestones need a small end-to-end increment before worker execution.
+
+**Decision.** Extend audience-preview with revision and an opaque SHA-256 comparison fingerprint over canonical templates and the ordered current recipient/channel/destination/rendered-content snapshot. Exclude the clock timestamp but include time-window membership. Require both the reviewed fingerprint and campaign-wide If-Match on POST approve. Lock the campaign in a bounded repeatable-read transaction, compare revision, reuse current consent-aware queries and message validators, reject an empty union and changed preview, freeze literal personalized payloads and enqueue pending rows, record approval metadata and increment revision once. Commit all rows and sending state together; no externally waiting approved state or separate enqueue endpoint. Fixed batches of 200 bound JSON records avoid per-recipient round trips without a new abstraction.
+
+Unique campaign/user/channel and deterministic unique idempotency keys protect insertion. A reconciled repeat using the current revision and original fingerprint returns existing counts without mutation; an old revision still fails. Unexpected pre-existing queue rows fail closed and roll back, rather than silently accepting different frozen data. PostgreSQL grouped counts drive GET delivery-status; it carries no recipient details or campaign ETag. Campaign GET remains the source for revision preconditions.
+
+**Alternatives.** Revision-only approval misses mutable audience changes. Count-only comparison misses same-count membership/contact/content changes. Separate approval/enqueue commits introduce partially approved campaigns and extra recovery semantics. Automatically accepting an old revision on repeats weakens the existing precondition contract. An additional approval-token table/content history is unnecessary for this scope.
+
+**Consequences.** Approval does snapshot/render/hash work twice (preview and approval), acceptable for the verified 5000-user case study. Profiles/consents may change after the transaction snapshot: future dispatch must recheck consent and retain frozen content. sending currently means pending queue work; there is no worker, provider call or completion transition. Migration 007 prepares attempt/due/lease/generation fields only. This implements approval/freeze portions of ADR-006/007/014, not their future worker, provider idempotency, recovery or final-consent guarantees. Existing revision/editing and mock-first policies remain. Exact runtime and error contracts are canonical in README; verification is recorded there.

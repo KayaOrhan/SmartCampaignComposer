@@ -47,10 +47,20 @@ Approved scope: keep SSE generation preview-only; explicit full-set GET/PUT mess
 
 Implementation increments: (1) separate forced-tool model configuration correction; (2) migration 005, revision-aware domain/store/HTTP and existing Postman contracts; (3) migration 006, transactional message persistence/editing, coherent GenerationInput and base_revision SSE payload; (4) concurrency, cancellation, upgrade, rollback and local Postman lifecycle verification. Each increment is checked before advancing. Provider interfaces, mock default and existing validation/security boundaries remain. No approval, enqueue, worker, delivery, frontend or live Anthropic calls. See ADR-021/022 and README for contracts and evidence.
 
+## Campaign approval and queue — first increment
+
+Approved scope: implement the approval and PostgreSQL queue portions of the existing milestones together, without worker execution. See ADR-023 and README for canonical contracts and verification.
+
+- Migration 007: approval source revision/fingerprint/preview, private frozen deliveries, database uniqueness and pending/due/lease fields.
+- Domain/store: literal allowlisted rendering, current consent-aware validation, revision-locked atomic approval/enqueue, reviewed snapshot comparison and repeat reconciliation.
+- HTTP/Postman: enriched audience-preview, conditional POST approve, aggregate GET delivery-status, strict errors and immutable approved content.
+- Checks: unit/HTTP, Docker PostgreSQL races, same-count audience changes, multi-batch rollback, cancellation and 5000-user seed; local mock/test Postman passed 97 requests and 232 assertions. Full evidence is in README.
+- No mock provider, worker, rate limiter, retry/recovery execution, frontend, real API calls or commits. Queue lifecycle columns prepare the next original milestone; they do not prove worker guarantees.
+
 ## Later slices
 
-1. Campaign approval and live Claude smoke verification when explicitly authorized.
-3. PostgreSQL deliveries queue (ADR-006), worker, retries, idempotency and fault-injecting mock provider.
+1. Live Claude smoke verification only when explicitly authorized; independent of backend delivery work.
+3. Complete the PostgreSQL deliveries milestone (ADR-006): worker, retries/recovery, send idempotency, consent recheck, rate limiting and fault-injecting mock provider. Approval and pending queue persistence are implemented above.
 4. Vue interface, dashboard and metrics; final verification and sanitized session exports.
 
 Each slice needs its own approved file plan. Final plain `docker compose up` must include seed and mock provider; tests require no real API key. Bonus scope remains deferred. No commits without explicit approval.

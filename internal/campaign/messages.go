@@ -40,6 +40,51 @@ func (v ValidatedMessages) JSON() json.RawMessage {
 	return append(json.RawMessage(nil), v.canonical...)
 }
 
+type RenderedMessage struct {
+	Subject *string `json:"subject"`
+	Body    string  `json:"body"`
+}
+
+// Render performs literal, nonrecursive substitution. Profile text containing
+// braces is data, never a second template or executable expression.
+func (v ValidatedMessages) Render(channel, firstName, city string) (RenderedMessage, error) {
+	var m Messages
+	if err := json.Unmarshal(v.canonical, &m); err != nil {
+		return RenderedMessage{}, segment.Invalid("invalid_message", "$")
+	}
+	for _, field := range []struct {
+		text  string
+		limit int
+	}{{firstName, 80}, {city, 120}} {
+		if !utf8.ValidString(field.text) || strings.ContainsRune(field.text, 0) || utf8.RuneCountInString(field.text) < 1 || utf8.RuneCountInString(field.text) > field.limit {
+			return RenderedMessage{}, segment.Invalid("invalid_audience_bounds", "audience")
+		}
+	}
+	replacer := strings.NewReplacer("{{first_name}}", firstName, "{{city}}", city)
+	result := RenderedMessage{}
+	switch {
+	case channel == "sms" && m.SMS != nil:
+		result.Body = replacer.Replace(m.SMS.Body)
+	case channel == "email" && m.Email != nil:
+		subject := replacer.Replace(m.Email.Subject)
+		result.Subject = &subject
+		result.Body = replacer.Replace(m.Email.Body)
+	default:
+		return result, segment.Invalid("channel_required", channel)
+	}
+	limit := 160
+	if channel == "email" {
+		limit = 2000
+		if strings.TrimSpace(*result.Subject) == "" || utf8.RuneCountInString(*result.Subject) > 80 {
+			return RenderedMessage{}, segment.Invalid("invalid_message", "email.subject")
+		}
+	}
+	if strings.TrimSpace(result.Body) == "" || utf8.RuneCountInString(result.Body) > limit {
+		return RenderedMessage{}, segment.Invalid("invalid_message", channel+".body")
+	}
+	return result, nil
+}
+
 // ValidateMessages measures every repeated placeholder with BOTH independent
 // maxima together. Zero-count channels use schema bounds, never zero lengths.
 func ValidateMessages(body []byte, channels []string, bounds map[string]Bounds) (ValidatedMessages, error) {

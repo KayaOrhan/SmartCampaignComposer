@@ -8,6 +8,8 @@ description: Use when touching the queue, worker, rate limiter, retries, idempot
 Flavour: Workflow. Sending must be safe to repeat, safe to crash, and never exceed limits.
 
 ## Table
+Migration 007 is the authoritative implemented schema. The sketch below describes the wider pipeline; worker/provider behavior remains planned. Implemented rows also freeze destination, subject and body, carry lease_expires_at and claim_generation, enforce a unique deterministic idempotency_key and use last_error_code (safe codes only), rather than raw last_error. No private recipient payload may enter HTTP status responses or logs.
+
 ```sql
 CREATE TABLE deliveries (
   id BIGSERIAL PRIMARY KEY,
@@ -29,7 +31,7 @@ CREATE TABLE deliveries (
 `idempotency_key` is deterministic: `campaign:{id}:user:{id}:{channel}`. `skipped` means consent was revoked before sending.
 
 ## Flow
-1. Approve runs in one transaction: `INSERT ... ON CONFLICT DO NOTHING` the audience snapshot, set campaign `sending`. Approving twice changes nothing.
+1. Approve runs in one transaction: lock/compare campaign revision, revalidate saved templates against the current consent-aware audience, compare the reviewed fingerprint, insert the frozen audience/payload snapshot and set campaign sending. Unexpected pre-existing rows fail closed. A reconciled repeat using the current revision and original fingerprint changes nothing; an old revision still fails. README and ADR-023 define the implemented API. Steps below remain future worker work, not verified runtime behavior.
 2. One worker loop per channel claims a batch:
    ```sql
    UPDATE deliveries SET status='in_flight', locked_at=now(), attempts=attempts+1

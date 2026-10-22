@@ -58,6 +58,19 @@ Manual Postman walkthrough:
 6. Try an unknown variable, overlong rendered field, missing channel or duplicate JSON key; GET confirms that text, revision and readiness are unchanged. Repeat an earlier save with staleETag to observe 412.
 7. Change or regenerate the segment using the current token. GET messages returns retained human text, draft status and validation=null. PUT that retained/edited set with the current token to revalidate and restore content_ready.
 
-The SSE CLI assertions remain buffered; Go socket tests establish incremental flushing/cancellation. Go PostgreSQL tests, rather than sequential collection requests, establish competing-writer behavior, current mutable audience bounds, cancellation and transactional rollback. Runtime contracts and response examples are canonical in README's Saved messages and editing section. No approval or delivery request is present.
+The SSE CLI assertions remain buffered; Go socket tests establish incremental flushing/cancellation. Go PostgreSQL tests, rather than sequential collection requests, establish competing-writer behavior, current mutable audience bounds, cancellation and transactional rollback. Runtime contracts and response examples are canonical in README's Saved messages and editing section. Approval/queue requests follow in their own folder; no delivery provider is called.
 
 3D verification on 2026-10-22: final local mock/test execution passed 74 requests and 176 assertions, zero failures, exit 0. Cloud reporting was disabled; no real Anthropic or delivery service was called.
+
+## Approval and queue walkthrough
+
+After the save/edit/revalidation folder, run Campaign approval and queue in order. All requests use collection variables. The complete runtime/error contract is in the root README's Campaign approval and PostgreSQL queue section.
+
+1. Save/revalidate the complete templates so the campaign is content_ready.
+2. POST /campaigns/{{campaignId}}/audience-preview with no body. Capture approval_fingerprint and that response's ETag together, and review the audience counts. A null fingerprint cannot approve.
+3. POST /campaigns/{{campaignId}}/approve with Content-Type application/json, If-Match set to the reviewed ETag and JSON {"approval_fingerprint":"<captured fingerprint>"}. HTTP 200 returns sending, a new revision/ETag, approval source revision and all-pending counts.
+4. GET /campaigns/{{campaignId}}/delivery-status to read persisted aggregate results. This endpoint has no ETag; the collection preserves the previous mutation token when an endpoint lacks one.
+5. A stale approval token returns 412. Reconcile with GET campaign after an uncertain response; the same fingerprint and current revision returns the existing receipt without duplicate rows. A changed current audience returns 409 approval_preview_changed with a safe preview requiring review. An empty union or invalid readiness is rejected without partial enqueueing.
+6. Try editing approved templates/segment or regenerating; all are rejected. Final delivery-status remains pending because no worker/provider is implemented in this increment.
+
+Verification on 2026-10-22: the documented local mock/test command passed 97 requests and 232 assertions, zero failures, exit 0. Cloud run reporting was disabled. PostgreSQL tests separately cover simultaneous writers, same-count audience changes and transaction rollback; sequential Postman requests do not establish those properties. No real Anthropic, SMS or email request was made.

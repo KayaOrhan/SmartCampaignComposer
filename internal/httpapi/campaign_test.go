@@ -39,6 +39,20 @@ func (f *fakeCampaignStore) Preview(ctx context.Context, id int64, at time.Time)
 	return campaign.Preview{AsOf: at, ByChannel: map[string]campaign.Bounds{}}, f.err
 }
 
+func (f *fakeCampaignStore) ApprovalPreview(ctx context.Context, id int64, at time.Time) (campaign.ApprovalPreview, error) {
+	p, err := f.Preview(ctx, id, at)
+	return campaign.ApprovalPreview{Preview: p, Revision: 1}, err
+}
+func (f *fakeCampaignStore) Approve(ctx context.Context, id, expected int64, fingerprint string, at time.Time) (campaign.DeliveryStatus, error) {
+	f.called(ctx)
+	f.asOf = at
+	return campaign.DeliveryStatus{CampaignID: id, Revision: expected + 1, Status: "sending"}, f.err
+}
+func (f *fakeCampaignStore) GetDeliveryStatus(ctx context.Context, id int64) (campaign.DeliveryStatus, error) {
+	f.called(ctx)
+	return campaign.DeliveryStatus{CampaignID: id, Revision: 1, Status: "draft"}, f.err
+}
+
 func (f *fakeCampaignStore) GenerationInput(ctx context.Context, id int64, at time.Time) (campaign.Campaign, campaign.Preview, error) {
 	return campaign.Campaign{}, campaign.Preview{}, f.err
 }

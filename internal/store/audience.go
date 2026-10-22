@@ -40,36 +40,64 @@ func (s Campaigns) GenerationInput(ctx context.Context, id int64, asOf time.Time
 }
 
 func previewInTx(ctx context.Context, tx *sql.Tx, c campaign.Campaign, asOf time.Time) (result campaign.Preview, resultErr error) {
+	result, _, resultErr = audienceInTx(ctx, tx, c, asOf, false)
+	return
+}
+
+type audienceRecipient struct {
+	id                                    int64
+	channel, firstName, city, destination string
+}
+
+func audienceInTx(ctx context.Context, tx *sql.Tx, c campaign.Campaign, asOf time.Time, collect bool) (result campaign.Preview, recipients []audienceRecipient, resultErr error) {
 	if !campaign.Editable(c.Status) {
-		return result, campaign.ErrState
+		return result, recipients, campaign.ErrState
 	}
 	if len(c.Segment) == 0 {
-		return result, campaign.ErrSegmentRequired
+		return result, recipients, campaign.ErrSegmentRequired
 	}
 	v, err := segment.ParseDocument(c.Segment)
 	if err != nil {
-		return result, ErrUnavailable
+		return result, recipients, ErrUnavailable
 	}
 	result = campaign.Preview{AsOf: asOf.UTC(), ByChannel: map[string]campaign.Bounds{}}
 	unique := map[int64]bool{}
 	for _, channel := range c.Channels {
 		query, args, err := v.Query(channel, asOf)
 		if err != nil {
-			return result, ErrUnavailable
+			return result, recipients, ErrUnavailable
+		}
+		if collect {
+			projection := "u.phone"
+			if channel == "email" {
+				projection = "u.email"
+			}
+			// Query is compiler-owned, parameterized SQL, never raw model output.
+			query = "SELECT a.id,a.first_name,a.city," + projection + " FROM (" + query + ") a JOIN app.users u ON u.id=a.id ORDER BY a.id"
 		}
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
-			return result, ErrUnavailable
+			return result, recipients, ErrUnavailable
 		}
 		bounds := campaign.Bounds{}
 		for rows.Next() {
 			var id int64
 			var firstName, city string
-			if err := rows.Scan(&id, &firstName, &city); err != nil {
+			var destination string
+			var scanErr error
+			if collect {
+				scanErr = rows.Scan(&id, &firstName, &city, &destination)
+			} else {
+				scanErr = rows.Scan(&id, &firstName, &city)
+			}
+			if scanErr != nil {
 				if closeErr := rows.Close(); closeErr != nil {
-					return result, ErrUnavailable
+					return result, recipients, ErrUnavailable
 				}
-				return result, ErrUnavailable
+				return result, recipients, ErrUnavailable
+			}
+			if collect {
+				recipients = append(recipients, audienceRecipient{id, channel, firstName, city, destination})
 			}
 			unique[id] = true
 			bounds.Count++
@@ -79,10 +107,10 @@ func previewInTx(ctx context.Context, tx *sql.Tx, c campaign.Campaign, asOf time
 		rowErr := rows.Err()
 		closeErr := rows.Close()
 		if rowErr != nil || closeErr != nil {
-			return result, ErrUnavailable
+			return result, recipients, ErrUnavailable
 		}
 		result.ByChannel[channel] = bounds
 	}
 	result.EligibleUnique = len(unique)
-	return result, nil
+	return result, recipients, nil
 }
