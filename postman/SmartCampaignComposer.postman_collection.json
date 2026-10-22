@@ -671,6 +671,314 @@
           }
         }
       ]
+    },
+    {
+      "name": "Segment persistence regressions",
+      "item": [
+        {
+          "name": "Canonical escaping save",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
+            "body": {
+              "mode": "raw",
+              "raw": "{{roundTripBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const value = \"<\".repeat(120);",
+                  "const body = JSON.stringify({version:1,all:Array.from({length:8},()=>({field:\"city\",op:\"in\",value:Array(20).fill(value)}))});",
+                  "if (Buffer.byteLength(body,\"utf8\") > 32768) throw new Error(\"Fixture exceeds ingress limit\");",
+                  "pm.variables.set(\"roundTripBody\",body);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Segment survives persistence\", () => pm.expect(pm.response.json().segment).to.deep.eql(JSON.parse(pm.variables.get(\"roundTripBody\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Canonical escaping read",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Segment survives persistence\", () => pm.expect(pm.response.json().segment).to.deep.eql(JSON.parse(pm.variables.get(\"roundTripBody\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Canonical escaping preview",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/audience-preview"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Empty synthetic audience\", () => { const p=pm.response.json(); pm.expect(p.eligible_unique).to.eql(0); pm.expect(p.by_channel.sms.count).to.eql(0); pm.expect(p.by_channel.email.count).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Canonical escaping repeat save",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
+            "body": {
+              "mode": "raw",
+              "raw": "{{roundTripBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Segment survives persistence\", () => pm.expect(pm.response.json().segment).to.deep.eql(JSON.parse(pm.variables.get(\"roundTripBody\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "JSONB whitespace save",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
+            "body": {
+              "mode": "raw",
+              "raw": "{{roundTripBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const value = \"\\u754c\".repeat(66) + \"a\";",
+                  "const body = JSON.stringify({version:1,all:Array.from({length:8},()=>({field:\"city\",op:\"in\",value:Array(20).fill(value)}))});",
+                  "if (Buffer.byteLength(body,\"utf8\") > 32768) throw new Error(\"Fixture exceeds ingress limit\");",
+                  "pm.variables.set(\"roundTripBody\",body);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Segment survives persistence\", () => pm.expect(pm.response.json().segment).to.deep.eql(JSON.parse(pm.variables.get(\"roundTripBody\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "JSONB whitespace read",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Segment survives persistence\", () => pm.expect(pm.response.json().segment).to.deep.eql(JSON.parse(pm.variables.get(\"roundTripBody\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "JSONB whitespace preview",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/audience-preview"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Empty synthetic audience\", () => { const p=pm.response.json(); pm.expect(p.eligible_unique).to.eql(0); pm.expect(p.by_channel.sms.count).to.eql(0); pm.expect(p.by_channel.email.count).to.eql(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "JSONB whitespace repeat save",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
+            "body": {
+              "mode": "raw",
+              "raw": "{{roundTripBody}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Segment survives persistence\", () => pm.expect(pm.response.json().segment).to.deep.eql(JSON.parse(pm.variables.get(\"roundTripBody\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Oversized segment remains rejected",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/segment",
+            "body": {
+              "mode": "raw",
+              "raw": "{{oversizedSegment}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"oversizedSegment\", \" \".repeat(32768)+pm.variables.get(\"roundTripBody\"));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 413\", () => pm.response.to.have.status(413));",
+                  "pm.test(\"Size error\", () => pm.expect(pm.response.json().error.code).to.eql(\"body_too_large\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Oversized update preserves saved segment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Segment survives persistence\", () => pm.expect(pm.response.json().segment).to.deep.eql(JSON.parse(pm.variables.get(\"roundTripBody\"))));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

@@ -33,7 +33,7 @@ Deterministic (fixed RNG seed), 5000 users. Emails end in `@example.test`; phone
 }
 ```
 - Allowed: `city` (`in`, 1 to 20 nonempty strings of at most 120 runes), `language` (`in`, 1 to 20 language codes of at most 16 characters), `cart_added` (`within_days`, integer 1 to 365), `purchase` (`within_days` or `none_within_days`, integer 1 to 365).
-- Only `all` (AND), 1 to 8 conditions. Reject unknown/case-mismatched keys, duplicate JSON keys, wrong types, nulls, unsupported versions, malformed UTF-8 and trailing JSON. JSON bodies are capped at 32768 bytes and nesting depth at 16.
+- Only `all` (AND), 1 to 8 conditions. Reject unknown/case-mismatched keys, duplicate JSON keys, wrong types, nulls, unsupported versions, malformed UTF-8 and trailing JSON. HTTP request JSON is capped at 32768 bytes. Canonical and stored JSONB documents are revalidated with a separate 262144-byte cap to allow serialization expansion; every structural and domain validator still applies. Nesting depth is capped at 16.
 - Capture one UTC `as_of` for the entire preview; event windows are `[as_of - N * 24h, as_of)`. Use EXISTS/NOT EXISTS to avoid duplicates from repeated events.
 - Consent is NOT part of the DSL. The query compiler adds the channel consent filter itself, always. Claude can never remove it.
 - `none_within_days` means "no order in the last N days". It is a simplification of "added to cart and did not buy". The trade-off is recorded in DECISIONS.md.

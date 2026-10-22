@@ -28,7 +28,7 @@ func (s Campaigns) Preview(ctx context.Context, id int64, asOf time.Time) (resul
 	if len(c.Segment) == 0 {
 		return result, campaign.ErrSegmentRequired
 	}
-	v, err := segment.Parse(c.Segment)
+	v, err := segment.ParseDocument(c.Segment)
 	if err != nil {
 		return result, ErrUnavailable
 	}

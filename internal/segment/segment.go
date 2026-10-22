@@ -15,6 +15,9 @@ import (
 
 const MaxJSONBytes = 32768
 
+// MaxDocumentBytes bounds canonical and PostgreSQL JSONB representations.
+const MaxDocumentBytes = 256 * 1024
+
 type ValidationError struct {
 	Code string `json:"code"`
 	Path string `json:"path"`
@@ -26,7 +29,11 @@ func Invalid(code, path string) error    { return &ValidationError{Code: code, P
 // DecodeStrict rejects duplicate keys, trailing values and invalid UTF-8 as well
 // as unknown struct fields. It never includes submitted values in errors.
 func DecodeStrict(body []byte, target any) error {
-	if len(body) > MaxJSONBytes {
+	return decodeStrict(body, target, MaxJSONBytes)
+}
+
+func decodeStrict(body []byte, target any, maxBytes int) error {
+	if len(body) > maxBytes {
 		return Invalid("body_too_large", "$")
 	}
 	if !utf8.Valid(body) {
@@ -168,8 +175,18 @@ func (v Validated) JSON() json.RawMessage { return append(json.RawMessage(nil), 
 var languageCode = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]{2,8})*$`)
 
 func Parse(body []byte) (Validated, error) {
+	return parse(body, MaxJSONBytes)
+}
+
+// ParseDocument revalidates stored or canonical JSON without reapplying the
+// HTTP ingress limit. All structural and domain checks remain identical.
+func ParseDocument(body []byte) (Validated, error) {
+	return parse(body, MaxDocumentBytes)
+}
+
+func parse(body []byte, maxBytes int) (Validated, error) {
 	var doc document
-	if err := DecodeStrict(body, &doc); err != nil {
+	if err := decodeStrict(body, &doc, maxBytes); err != nil {
 		return Validated{}, err
 	}
 	if doc.Version != 1 {

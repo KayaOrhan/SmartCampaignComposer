@@ -1,6 +1,7 @@
 package segment
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -116,5 +117,48 @@ func TestQueryWindowsAndZeroValue(t *testing.T) {
 	}
 	if _, _, err := (Validated{}).Query("sms", asOf); err == nil {
 		t.Fatal("zero value compiled")
+	}
+}
+
+func TestDocumentRoundTrip(t *testing.T) {
+	values := make([]string, 20)
+	for i := range values {
+		values[i] = strings.Repeat("<", 120)
+	}
+	conditions := make([]map[string]any, 8)
+	for i := range conditions {
+		conditions[i] = map[string]any{"field": "city", "op": "in", "value": values}
+	}
+	var input bytes.Buffer
+	encoder := json.NewEncoder(&input)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(map[string]any{"version": 1, "all": conditions}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := Parse(input.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.JSON()) <= MaxJSONBytes {
+		t.Fatal("fixture does not expand beyond ingress limit")
+	}
+	if _, err := Parse(v.JSON()); err == nil {
+		t.Fatal("HTTP limit was relaxed")
+	}
+	stored, err := ParseDocument(v.JSON())
+	if err != nil || !bytes.Equal(stored.JSON(), v.JSON()) {
+		t.Fatal("canonical round trip failed", err)
+	}
+	for _, body := range []string{
+		strings.Repeat(" ", MaxDocumentBytes) + validSegment,
+		strings.Replace(validSegment, `"version":1`, `"version":1,"version":1`, 1),
+		strings.Replace(validSegment, `"city"`, `"consent"`, 1),
+		strings.Replace(validSegment, `"field"`, `"FIELD"`, 1),
+		strings.Replace(validSegment, "Istanbul", strings.Repeat("a", 121), 1),
+		validSegment + " {}",
+	} {
+		if _, err := ParseDocument([]byte(body)); err == nil {
+			t.Fatal("invalid stored document accepted")
+		}
 	}
 }

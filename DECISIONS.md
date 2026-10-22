@@ -193,3 +193,14 @@ Seed version 1 inserts 5000 deterministic fake profiles and events in one transa
 **Consequences.** Preview loads matching recipients into memory to compute distinct counts and bounds, appropriate for the 5000-user case study; aggregate SQL is the scaling path. Seeding and migrations still assume one API instance. Development seed data ages over time. Real Claude contracts, messages, approval, delivery queue and metrics remain later work; ADR-006 is unchanged.
 
 **Verification.** Unit and HTTP validation tests, TestLLMOutputNeverReachesSQL, PostgreSQL consent/time/deduplication cases, single-channel and empty previews, immutable non-draft segments, migration upgrade and rollback, seed repeat/rollback, live API aggregate checks and restart all passed. The changed domain skill passed the bundled validator using pinned PyYAML 6.0.3 in temporary tooling storage (package and maintainers verified on PyPI before installation). Actual results are recorded in README.
+
+## ADR-017: Separate segment ingress and document limits
+Status: Accepted
+
+**Context.** An accepted compact request can exceed 32768 bytes after Go HTML escaping or PostgreSQL JSONB whitespace formatting. Applying the ingress limit again breaks save, read and preview.
+
+**Decision.** Keep HTTP input capped at 32768 bytes. Revalidate canonical and stored documents through the same strict DSL parser with a separate 262144-byte bound. The DSL permits at most 160 city strings of 120 runes; six-byte JSON escapes plus fixed structure remain below this bound. Preserve duplicate-key, exact-field, UTF-8, nesting, type, condition, string and operator checks. No new dependencies, schema or endpoint changes.
+
+**Trade-off.** Internal parsing accepts larger encodings of valid documents while remaining bounded. Removing validation or raising the public request limit would weaken the contract unnecessarily.
+
+**Verification.** Unit, HTTP, PostgreSQL and maintained Postman regressions; actual execution results are recorded in README.

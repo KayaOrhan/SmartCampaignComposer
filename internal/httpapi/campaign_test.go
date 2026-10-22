@@ -63,6 +63,7 @@ func TestCampaignRoutes(t *testing.T) {
 		{"bad segment", "PUT", "/campaigns/1/segment", `{"version":1,"all":[]}`, nil, 422, 0},
 		{"trailing json", "PUT", "/campaigns/1/segment", valid + ` {}`, nil, 400, 0},
 		{"oversized", "POST", "/campaigns", strings.Repeat("a", segment.MaxJSONBytes+1), nil, 413, 0},
+		{"oversized segment", "PUT", "/campaigns/1/segment", strings.Repeat(" ", segment.MaxJSONBytes) + valid, nil, 413, 0},
 		{"preview body", "POST", "/campaigns/1/audience-preview", `{"channel":"push"}`, nil, 422, 0},
 		{"wrong method", "DELETE", "/campaigns/1", "", nil, 405, 0},
 	} {

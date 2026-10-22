@@ -103,3 +103,21 @@ Make is now available. Race testing remains blocked by missing CGO/compiler supp
 - Current `.gitignore` excludes all `ai-sessions/`; narrow this to raw exports before preparing sanitized submission records.
 - Later domain limitations remain in ADR-002/005/013/014: abandonment approximation, SMS segment estimates, final consent race, per-channel ownership and conservative rendering bounds.
 - Scheduling, A/B variants, per-user language and CI are optional and deferred.
+
+## Slice 2.1 verification (2026-10-22)
+
+Segment HTTP input remains capped at 32768 bytes. Canonical and stored JSONB representations use the separate bounded parser described in ADR-017; all DSL validation remains shared. No endpoint, dependency or migration was added.
+
+Executed successfully: `make check`; `make test-integration` against local Docker PostgreSQL; `docker compose --env-file .env.example up -d --build api`; and the documented local Postman collection command. Postman executed 31 requests and 82 assertions, zero failures, exit 0. Generated regressions cover HTML escaping, JSONB whitespace expansion, read/preview/repeat-save and oversized HTTP rejection preserving the saved document. The PostgreSQL test asserts that its compact Unicode fixture crosses the ingress byte limit specifically after JSONB storage.
+
+Actual check output included:
+
+```text
+repository safety and formatting checks passed
+go vet -mod=readonly ./...
+go test -mod=readonly ./...
+```
+
+All listed Go packages passed. Temporarily changing the document parser back to the ingress cap caused `TestDocumentRoundTrip` to fail with `canonical round trip failed body_too_large at $`; source was restored before the final checks. The changed domain skill passed the bundled validator (`Skill is valid!`) using the existing temporary PyYAML tooling installation.
+
+Safety coverage: Rule 1 and boundary validation are exercised by `TestValidation`, `TestDocumentRoundTrip` and `TestLLMOutputNeverReachesSQL`; Rule 3 remains covered by `TestDomain`; repeat-safe persistence is covered by `TestSegmentPersistenceRoundTrip`. Rules 5/7 are supported by the repository safety check and explicit Compose template use. Rule 9 is supported by the deliberate failing regression control. No external LLM/provider calls or new dependencies were introduced. Race testing remains blocked by the existing missing CGO compiler. The local collection creates one persistent synthetic draft per full run.

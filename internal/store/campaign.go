@@ -46,7 +46,7 @@ func readCampaign(row rowScanner) (campaign.Campaign, error) {
 		return c, ErrUnavailable
 	}
 	if raw != nil {
-		validated, err := segment.Parse(raw)
+		validated, err := segment.ParseDocument(raw)
 		if err != nil {
 			return campaign.Campaign{}, ErrUnavailable
 		}
@@ -65,7 +65,7 @@ func (s Campaigns) Get(ctx context.Context, id int64) (campaign.Campaign, error)
 }
 
 func (s Campaigns) PutSegment(ctx context.Context, id int64, v segment.Validated) (result campaign.Campaign, resultErr error) {
-	if _, err := segment.Parse(v.JSON()); err != nil {
+	if _, err := segment.ParseDocument(v.JSON()); err != nil {
 		return result, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)

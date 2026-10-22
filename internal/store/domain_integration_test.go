@@ -3,9 +3,12 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,5 +230,68 @@ func TestSeedPersistence(t *testing.T) {
 	var reference time.Time
 	if err := db.QueryRowContext(ctx, `SELECT reference_time FROM app.seed_runs WHERE version=1`).Scan(&reference); err != nil || !reference.Equal(asOf) {
 		t.Fatal("seed anchor changed")
+	}
+}
+
+func TestSegmentPersistenceRoundTrip(t *testing.T) {
+	db, ctx := testDatabase(t)
+	if err := Migrate(ctx, db, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	repo := Campaigns{DB: db, Timeout: 5 * time.Second}
+	for _, tc := range []struct {
+		name, value    string
+		jsonbExpansion bool
+	}{
+		{"canonical escaping", strings.Repeat("<", 120), false},
+		{"JSONB whitespace", strings.Repeat("界", 66) + "a", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := make([]string, 20)
+			for i := range values {
+				values[i] = tc.value
+			}
+			conditions := make([]map[string]any, 8)
+			for i := range conditions {
+				conditions[i] = map[string]any{"field": "city", "op": "in", "value": values}
+			}
+			var input bytes.Buffer
+			enc := json.NewEncoder(&input)
+			enc.SetEscapeHTML(false)
+			if err := enc.Encode(map[string]any{"version": 1, "all": conditions}); err != nil {
+				t.Fatal(err)
+			}
+			v, err := segment.Parse(input.Bytes())
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := repo.Create(ctx, campaign.Draft{Brief: "round trip fixture", Channels: []string{"sms", "email"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+				t.Fatal("initial save", err)
+			}
+			if tc.jsonbExpansion {
+				var size int
+				if err := db.QueryRowContext(ctx, `SELECT octet_length(segment_json::text) FROM app.campaigns WHERE id=$1`, c.ID).Scan(&size); err != nil {
+					t.Fatal(err)
+				}
+				if len(v.JSON()) > segment.MaxJSONBytes || size <= segment.MaxJSONBytes {
+					t.Fatalf("fixture must cross limit only after JSONB: canonical=%d stored=%d", len(v.JSON()), size)
+				}
+			}
+			stored, err := repo.Get(ctx, c.ID)
+			if err != nil || !bytes.Equal(stored.Segment, v.JSON()) {
+				t.Fatal("read failed", err)
+			}
+			p, err := repo.Preview(ctx, c.ID, time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC))
+			if err != nil || p.EligibleUnique != 0 || len(p.ByChannel) != 2 {
+				t.Fatal("preview failed", err)
+			}
+			if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+				t.Fatal("repeat save", err)
+			}
+		})
 	}
 }

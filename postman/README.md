@@ -25,3 +25,7 @@ Audience counts are deliberately not fixed: seeded events age, and consent/profi
 The canonical maintenance policy already exists in [AGENTS.md](../AGENTS.md#api-contract--postman-testing). Update this collection alongside API contract changes, using the official Postman plugin workflow. The Go handlers and domain contracts define implemented behavior.
 
 Verification on 2026-10-21: the documented CLI command passed against the local Compose API at `http://127.0.0.1:8080`: 21 requests, 62 assertions, zero failures, exit 0. A temporary copy with a deliberately wrong health-status assertion failed with exit 1; it was removed without changing the maintained collection. `make check` passed (safety/format checks, vet and unit tests). The CLI emitted cloud-login notices but ran locally without login. `postman collection lint` reported `Scanned: 0` for this v2.1 JSON artifact, so it is not counted as schema-validation evidence; execution successfully parsed and ran all requests.
+
+Slice 2.1 adds generated compact fixtures for HTML escaping and near-limit Unicode JSONB formatting. Each is saved, read, previewed and saved again. An oversized segment update must return 413 and preserve the prior document. Fixtures are generated in run-local variables, with no large committed payloads.
+
+Verification on 2026-10-22: the documented local CLI command passed against the rebuilt Compose API: 31 requests, 82 assertions, zero failures, exit 0. No cloud reporting, real LLM or delivery calls were used.

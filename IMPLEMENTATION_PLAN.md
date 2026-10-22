@@ -25,6 +25,10 @@ Approved scope: versioned domain migration, campaign drafts, deterministic 5000-
 - Seed: `seed/seed.go`, enabled in Compose; one transaction and no overwrite on restart. Only non-dialable fake contact identifiers.
 - Verification: unit/boundary tests, migration upgrade/repeat/rollback, PostgreSQL domain/seed tests, live API smoke and restart checks. Results belong in README.
 
+## Slice 2.1: Segment persistence repair
+
+Approved scope: preserve the 32768-byte HTTP ingress cap; revalidate canonical and PostgreSQL JSONB documents with a separate 262144-byte cap and identical DSL checks. Cover HTML escaping and JSONB whitespace expansion with unit, PostgreSQL and Postman round-trip regressions, including repeat save, preview and oversized HTTP rejection. No new endpoints, dependencies or migrations. Verification results belong in README.
+
 ## Later slices
 
 1. Mock LLM contracts, campaign messages/edit/approval, Claude integration and streamed messages.
