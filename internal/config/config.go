@@ -12,6 +12,7 @@ type Config struct {
 	Address     string
 	DatabaseURL string
 	DBTimeout   time.Duration
+	SeedData    bool
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -33,6 +34,12 @@ func Load(getenv func(string) string) (Config, error) {
 		if err != nil || c.DBTimeout <= 0 || c.DBTimeout > 30*time.Second {
 			return Config{}, errors.New("DB_TIMEOUT must be positive and at most 30s")
 		}
+	}
+	if raw := getenv("SEED_DATA"); raw != "" {
+		if raw != "true" && raw != "false" {
+			return Config{}, errors.New("SEED_DATA must be true or false")
+		}
+		c.SeedData = raw == "true"
 	}
 	return c, nil
 }

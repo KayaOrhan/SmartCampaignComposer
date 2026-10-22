@@ -19,7 +19,7 @@ brief -> segment DSL (Claude) -> validated query -> audience preview -> messages
 - `deliveries`: defined in `delivery-pipeline`.
 
 ## Seed data
-Deterministic (fixed RNG seed), about 5000 users. Emails end in `@example.test` and phones come from a reserved fake range, so seed data can never be mistaken for real people. Make the data awkward on purpose: uneven consent per channel, some users with no consent at all, carts followed by a purchase, city spellings like `Istanbul` and `İstanbul`. Easy data hides bugs.
+Deterministic (fixed RNG seed), 5000 users. Emails end in `@example.test`; phone values are non-dialable identifiers (`mock-phone-000001`), never invented real-world numbers. Seed once transactionally when `SEED_DATA=true`, recording its version and UTC reference time. Repeated startup must preserve profile and consent edits. The dataset ages naturally; tests inject a fixed reference time. Include uneven consent per channel, missing consent, repeated carts, purchases and city spelling variants.
 
 ## Segment DSL (version 1)
 ```json
@@ -32,8 +32,9 @@ Deterministic (fixed RNG seed), about 5000 users. Emails end in `@example.test` 
   ]
 }
 ```
-- Allowed: `city` (`in`, 1 to 20 strings), `language` (`in`), `cart_added` (`within_days`, 1 to 365), `purchase` (`within_days` or `none_within_days`, 1 to 365).
-- Only `all` (AND), at most 8 conditions. Anything else is rejected, not ignored.
+- Allowed: `city` (`in`, 1 to 20 nonempty strings of at most 120 runes), `language` (`in`, 1 to 20 language codes of at most 16 characters), `cart_added` (`within_days`, integer 1 to 365), `purchase` (`within_days` or `none_within_days`, integer 1 to 365).
+- Only `all` (AND), 1 to 8 conditions. Reject unknown/case-mismatched keys, duplicate JSON keys, wrong types, nulls, unsupported versions, malformed UTF-8 and trailing JSON. JSON bodies are capped at 32768 bytes and nesting depth at 16.
+- Capture one UTC `as_of` for the entire preview; event windows are `[as_of - N * 24h, as_of)`. Use EXISTS/NOT EXISTS to avoid duplicates from repeated events.
 - Consent is NOT part of the DSL. The query compiler adds the channel consent filter itself, always. Claude can never remove it.
 - `none_within_days` means "no order in the last N days". It is a simplification of "added to cart and did not buy". The trade-off is recorded in DECISIONS.md.
 
@@ -51,7 +52,7 @@ Deterministic (fixed RNG seed), about 5000 users. Emails end in `@example.test` 
 - The audience and rendered payloads are frozen into `deliveries` at approval (ADR-014). Revalidate against the approval snapshot; if membership or content differs from the preview, return an updated preview for human approval rather than silently approving a changed audience. Never recompute membership or personalize from mutable profiles at send time. Consent revocation and cancellation may reduce actual sends; show skipped deliveries separately.
 
 ## Gotchas
-- Turkish case folding: `strings.ToLower("İstanbul")` yields an `i` plus a combining dot, which will not equal `istanbul`. Normalise with `golang.org/x/text/cases` and `language.Turkish`, and store `city_norm` at seed time. Test with `İstanbul`, `ISTANBUL`, `istanbul`.
+- Normalize cities with NFC, trimmed whitespace and `cases.Lower(language.Turkish)`. Explicitly map the resulting `ıstanbul` and `istanbul` aliases to `istanbul`; locale lowercasing alone does not unify English ASCII I with Turkish dotted I. Apply the same function to seed data and filters. Tests cover composed/decomposed dotted I and ASCII upper/lower variants. Do not strip accents globally.
 - SMS encoding: the brief says 160 characters, but Turkish letters (`ş ğ ı İ`) force UCS-2, where a single SMS holds 70. Hard limit stays 160 (that is the spec). Compute an informational `sms_segments` and warn the marketer. Decision in DECISIONS.md.
 - "Last 30 days" is relative to an injected clock in UTC. Tests never call `time.Now()` directly.
 - Count the characters of the rendered string as runes, not bytes.

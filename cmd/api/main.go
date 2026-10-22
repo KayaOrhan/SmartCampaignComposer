@@ -13,6 +13,7 @@ import (
 	"github.com/KayaOrhan/SmartCampaignComposer/internal/config"
 	"github.com/KayaOrhan/SmartCampaignComposer/internal/httpapi"
 	"github.com/KayaOrhan/SmartCampaignComposer/internal/store"
+	"github.com/KayaOrhan/SmartCampaignComposer/seed"
 )
 
 func main() {
@@ -50,7 +51,13 @@ func run(ctx context.Context, logger *slog.Logger) (result error) {
 	if err := store.Migrate(ctx, db, 30*time.Second); err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: cfg.Address, Handler: httpapi.Handler(db.PingContext, cfg.DBTimeout), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 60 * time.Second}
+	if cfg.SeedData {
+		if err := seed.Ensure(ctx, db, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	repo := store.Campaigns{DB: db, Timeout: cfg.DBTimeout}
+	srv := &http.Server{Addr: cfg.Address, Handler: httpapi.Handler(db.PingContext, cfg.DBTimeout, repo), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 60 * time.Second}
 	stopped := make(chan error, 1)
 	go func() { stopped <- srv.ListenAndServe() }()
 	logger.Info("api starting", "address", cfg.Address)

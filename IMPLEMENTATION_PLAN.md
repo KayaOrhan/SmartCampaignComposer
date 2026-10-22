@@ -14,10 +14,20 @@ Approved scope: Go module, standard-library HTTP API, PostgreSQL pool with conte
 
 Verification evidence and limitations belong in [README.md](README.md). Do not claim a configured command has passed without actual execution.
 
+## Slice 2: Campaign domain, seed data and segment engine
+
+Approved scope: versioned domain migration, campaign drafts, deterministic 5000-user seed, strict segment DSL and consent-aware audience preview. No LLM adapter, messages, approval or delivery execution yet.
+
+- Schema: `migrations/002_campaign_domain.sql`; users, consents, carts, orders, draft campaigns and seed marker.
+- Domain/queries: `internal/campaign`, `internal/segment`; validated types compile fixed SQL with bound values and mandatory channel consent.
+- Storage: `internal/store/campaign.go`, `audience.go`; draft persistence and one repeatable-read transaction per aggregate preview.
+- API: create/get drafts, PUT validated segment, POST audience preview. See README for the API contract and domain skill for DSL rules.
+- Seed: `seed/seed.go`, enabled in Compose; one transaction and no overwrite on restart. Only non-dialable fake contact identifiers.
+- Verification: unit/boundary tests, migration upgrade/repeat/rollback, PostgreSQL domain/seed tests, live API smoke and restart checks. Results belong in README.
+
 ## Later slices
 
-1. Validated segment DSL, consent-aware fake data and mock LLM contracts.
-2. Campaign preview/edit/approval, Claude integration and streamed messages.
+1. Mock LLM contracts, campaign messages/edit/approval, Claude integration and streamed messages.
 3. PostgreSQL deliveries queue (ADR-006), worker, retries, idempotency and fault-injecting mock provider.
 4. Vue interface, dashboard and metrics; final verification and sanitized session exports.
 

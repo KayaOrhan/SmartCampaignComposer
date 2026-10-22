@@ -5,6 +5,7 @@ Read and follow these project documents:
 - RULES.md — mandatory security and correctness rules.
 - CLAUDE.md — architecture, workflow and conventions.
 - DECISIONS.md — architecture decisions and tradeoffs.
+- IMPLEMENTATION_PLAN.md — implementation phases, scope and progress.
 
 If instructions conflict, RULES.md takes precedence.
 
@@ -59,6 +60,21 @@ These instructions apply before EVERY tool call, regardless of shell or tool nam
 - Never bypass hooks using `--no-verify`, hook-path overrides, environment switches or equivalent mechanisms. Never force-push, including `--force`, `-f`, `--force-with-lease` or a `+` refspec. Fix the underlying failure instead.
 - Never print or log secrets or recipient data. Do not read credential stores or private keys. Guard failures fail closed; a missing guard dependency is not permission to bypass the guard.
 - No commit without explicit user approval. Plans that touch more than two files or segment, LLM or delivery logic require approval before implementation. Explicit approval of named documentation changes permits those edits only.
+
+## API Contract & Postman Testing
+
+- The repository's Postman collection is maintained under `postman/`.
+- Treat the Go HTTP handlers and domain contracts as the source of truth for implemented API behavior.
+- Whenever an API endpoint is added, removed, or its request/response contract changes, update the corresponding Postman requests and assertions in the same task.
+- For API bug fixes, add a Postman regression test when the bug is observable over HTTP.
+- Reuse collection variables such as `baseUrl` and `campaignId`. Never hardcode generated resource IDs.
+- Use the official Postman plugin and its skills when available. Do not duplicate or override its instructions.
+- Run affected collection tests against the local Docker Compose environment when available. Report pass/fail results and any tests that could not run.
+- Never claim Postman tests passed without executing them.
+- Run Postman tests only against local or explicitly approved test environments. Never trigger real SMS/email delivery or use real customer data.
+- Keep collections synchronized with API changes, but do not change API behavior solely to satisfy outdated Postman tests.
+- Follow the existing planning and approval workflow before modifying files.
+
 
 ## Safety
 

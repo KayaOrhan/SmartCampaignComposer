@@ -9,7 +9,7 @@ import (
 )
 
 // Handler takes a context-aware database check so unit tests need no database.
-func Handler(ping func(context.Context) error, timeout time.Duration) http.Handler {
+func Handler(ping func(context.Context) error, timeout time.Duration, campaigns CampaignStore) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusOK, `{"status":"ok"}`)
@@ -23,6 +23,9 @@ func Handler(ping func(context.Context) error, timeout time.Duration) http.Handl
 		}
 		respond(w, http.StatusOK, `{"status":"ready"}`)
 	})
+	if campaigns != nil {
+		registerCampaigns(mux, campaigns, time.Now, timeout)
+	}
 	return mux
 }
 

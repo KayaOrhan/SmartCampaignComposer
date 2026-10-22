@@ -176,3 +176,20 @@ Apply trusted, embedded, numbered SQL files in lexical order in one startup tran
 **Consequences.** Pools have 10 open/5 idle connections. Database operations have deadlines; errors omit raw driver details to avoid leaking credentials. The scratch runtime contains only the API binary; current Compose database traffic is local without TLS. Foundation logs have no campaign or delivery identifiers because those entities do not exist yet. Later slices retain the PostgreSQL queue decision in ADR-006.
 
 **Verification.** Endpoint/config tests, safety checks, PostgreSQL migration apply/repeat/rollback tests, Docker startup and database outage/recovery probes. See README for actual results. Keep this record Proposed until required checks pass.
+
+## ADR-016: Draft campaigns and consent-aware segment previews
+Status: Accepted
+
+**Context.** Slice 2 must exercise the validated audience flow before LLM generation or delivery is implemented. Missing consent must exclude recipients, and repeated cart/order rows must not inflate counts.
+
+**Decision.** Add relational user/consent/cart/order data, draft campaigns with JSONB segments and canonical channel arrays, and a versioned seed marker through migration 002. Parse segment JSON strictly into immutable validated types. Exact field spelling, duplicate-key rejection, input bounds and parameter-only values protect the query boundary; consent is added by the compiler. Domain skill holds the canonical DSL limits and time-window semantics.
+
+The API accepts manual segments for now, persists only validated segments and exposes aggregate preview results without contacts or recipient rows. Each preview captures one UTC time and uses a repeatable-read transaction across selected channels. It returns distinct eligible recipients, per-channel counts and independent maximum first-name/city rune lengths. It is not an approval snapshot. Segment changes are restricted to draft state and updates lock the campaign row.
+
+Seed version 1 inserts 5000 deterministic fake profiles and events in one transaction. Compose enables it explicitly. Record the first reference time, preserve later profile/consent changes, and never reseed on restart. Phone identifiers are deliberately non-dialable instead of claiming a reserved Turkish range. Promote the existing pinned golang.org/x/text v0.29.0 to a direct dependency; its cached registry metadata identifies the Go text repository and exact tag. City aliases and normalization are specified in the domain skill.
+
+**Alternatives.** SQL emitted by a model (forbidden); unfiltered base-audience counts (risk of consent bypass); joins over cart events (duplicate recipients); recomputing seed data on startup (destroys revocations); dialable fake numbers (may identify real people).
+
+**Consequences.** Preview loads matching recipients into memory to compute distinct counts and bounds, appropriate for the 5000-user case study; aggregate SQL is the scaling path. Seeding and migrations still assume one API instance. Development seed data ages over time. Real Claude contracts, messages, approval, delivery queue and metrics remain later work; ADR-006 is unchanged.
+
+**Verification.** Unit and HTTP validation tests, TestLLMOutputNeverReachesSQL, PostgreSQL consent/time/deduplication cases, single-channel and empty previews, immutable non-draft segments, migration upgrade and rollback, seed repeat/rollback, live API aggregate checks and restart all passed. The changed domain skill passed the bundled validator using pinned PyYAML 6.0.3 in temporary tooling storage (package and maintainers verified on PyPI before installation). Actual results are recorded in README.

@@ -23,6 +23,9 @@ func TestLoad(t *testing.T) {
 		{"negative timeout", "DB_TIMEOUT", "-1s", false},
 		{"large timeout", "DB_TIMEOUT", "31s", false},
 		{"invalid timeout", "DB_TIMEOUT", "invalid", false},
+		{"seed enabled", "SEED_DATA", "true", true},
+		{"seed disabled", "SEED_DATA", "false", true},
+		{"invalid seed flag", "SEED_DATA", "yes", false},
 		{"private invalid URL", "DATABASE_URL", "postgres://user:private-value@%/app", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,6 +42,9 @@ func TestLoad(t *testing.T) {
 			}
 			if err == nil && (cfg.DBTimeout <= 0 || cfg.DBTimeout > 30*time.Second) {
 				t.Fatal("invalid timeout accepted")
+			}
+			if err == nil && cfg.SeedData != (values["SEED_DATA"] == "true") {
+				t.Fatal("seed flag not applied")
 			}
 		})
 	}

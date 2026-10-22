@@ -14,4 +14,4 @@ check: lint test
 
 test-integration:
 	docker compose up -d db
-	docker compose --profile test run --rm test
+	docker compose --profile test run --build --rm test

@@ -5,6 +5,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 COPY migrations ./migrations
+COPY seed ./seed
 RUN CGO_ENABLED=0 go build -trimpath -o /api ./cmd/api
 
 FROM scratch
