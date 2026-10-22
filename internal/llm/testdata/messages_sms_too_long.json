@@ -1,0 +1,15 @@
+{
+  "tool": "generate_messages",
+  "input": {
+    "sms": {
+      "body": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "email": {
+      "subject": "Sepetinde %30 indirim seni bekliyor",
+      "body": "Merhaba {{first_name}}, {{city}} icin sepetteki urunlerine %30 indirim. Kampanyaya goz at!"
+    }
+  },
+  "refusal": false,
+  "input_tokens": 0,
+  "output_tokens": 0
+}

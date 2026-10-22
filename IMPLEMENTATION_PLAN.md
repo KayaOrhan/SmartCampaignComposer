@@ -33,6 +33,10 @@ Approved scope: preserve the 32768-byte HTTP ingress cap; revalidate canonical a
 
 Approved scope: fixture-backed replaceable LLM provider, versioned segment prompt/schema, existing strict DSL validation, at most two repairs, bounded transient retry and timeout, metadata-only call audit (migration 003), and bodyless POST `/campaigns/{id}/generate-segment`. Persist only valid results on drafts, with state rechecked after generation. Include Go/PostgreSQL and maintained Postman tests. No SDK, real API calls, messages, approval, streaming or delivery implementation. See ADR-018 and README for behavior and verification evidence.
 
+## Slice 3B: Mock message generation and streaming
+
+Approved scope: selected-channel SMS/email validator with worst-case placeholder rendering, versioned message prompt/schema, mock chunks with configurable delay and failure scenarios, shared bounded call runner/auditing, and bodyless POST `/campaigns/{id}/generate-messages` over SSE. Events are attempt, provisional delta, then terminal validated/error. Recompute an aggregate consent-aware preview; keep messages ephemeral and campaign state draft. Migration 004 extends audit call names. Cover real incremental flushing, disconnects, repairs, limit boundaries and local Postman SSE assertions. No message persistence/editing/approval, frontend, real Claude or delivery. See ADR-019 and README for behavior and actual checks.
+
 ## Later slices
 
 1. Campaign messages/edit/approval, real Claude integration and streamed messages.

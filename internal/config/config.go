@@ -9,13 +9,15 @@ import (
 )
 
 type Config struct {
-	Address         string
-	DatabaseURL     string
-	DBTimeout       time.Duration
-	SeedData        bool
-	LLMProvider     string
-	LLMMockScenario string
-	LLMTimeout      time.Duration
+	Address                string
+	DatabaseURL            string
+	DBTimeout              time.Duration
+	SeedData               bool
+	LLMProvider            string
+	LLMMockScenario        string
+	LLMMockMessageScenario string
+	LLMMockChunkDelay      time.Duration
+	LLMTimeout             time.Duration
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -61,6 +63,15 @@ func Load(getenv func(string) string) (Config, error) {
 		c.LLMTimeout, err = time.ParseDuration(raw)
 		if err != nil || c.LLMTimeout <= 0 || c.LLMTimeout > 30*time.Second {
 			return Config{}, errors.New("LLM_TIMEOUT must be positive and at most 30s")
+		}
+	}
+
+	c.LLMMockMessageScenario = getenv("LLM_MOCK_MESSAGE_SCENARIO")
+	c.LLMMockChunkDelay = 10 * time.Millisecond
+	if raw := getenv("LLM_MOCK_CHUNK_DELAY"); raw != "" {
+		c.LLMMockChunkDelay, err = time.ParseDuration(raw)
+		if err != nil || c.LLMMockChunkDelay < 0 || c.LLMMockChunkDelay > time.Second {
+			return Config{}, errors.New("LLM_MOCK_CHUNK_DELAY must be between 0s and 1s")
 		}
 	}
 	return c, nil

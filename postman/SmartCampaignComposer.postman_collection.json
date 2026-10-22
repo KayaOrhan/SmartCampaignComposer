@@ -161,6 +161,26 @@
       ]
     },
     {
+      "name": "Message generation requires segment",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-messages"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"HTTP 409\",()=>pm.response.to.have.status(409));",
+              "pm.test(\"Safe error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"segment_required\",path:\"$\"}));"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "Save segment",
       "request": {
         "method": "PUT",
@@ -1198,6 +1218,212 @@
                   "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
                   "pm.test(\"Validated generated segment\",()=>{const c=pm.response.json();pm.expect(c.id).to.eql(Number(pm.variables.get(\"campaignId\")));pm.expect(c.status).to.eql(\"draft\");pm.expect(c.segment).to.deep.eql(JSON.parse(pm.variables.get(\"generatedSegment\")));});",
                   "pm.test(\"JSON and no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Mock message streaming (3B)",
+      "item": [
+        {
+          "name": "Read source before message stream",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.variables.set(\"messageSourceSegment\",JSON.stringify(pm.response.json().segment));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate mock messages over SSE",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200 SSE, no-store\",()=>{pm.response.to.have.status(200);pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/event-stream\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});",
+                  "const frames=pm.response.text().trim().split(/\\r?\\n\\r?\\n/).map(frame=>{const lines=frame.split(/\\r?\\n/);if(lines.length!==2)throw new Error(\"Bad SSE frame\");return {kind:lines[0].replace(/^event: /,\"\"),data:JSON.parse(lines[1].replace(/^data: /,\"\"))};});",
+                  "let attempt=0,parts={},last=null,finals=0,deltas=0;",
+                  "for(const frame of frames){const e=frame.data;if(frame.kind===\"attempt\"){pm.expect(e.attempt).to.eql(attempt+1);attempt=e.attempt;parts={};}else if(frame.kind===\"delta\"){pm.expect(e.attempt).to.eql(attempt);pm.expect([\"sms\",\"email\"]).to.include(e.channel);pm.expect(e.channel===\"sms\"?[\"body\"]:[\"subject\",\"body\"]).to.include(e.field);const key=e.channel+\".\"+e.field;parts[key]=(parts[key]||\"\")+e.text;deltas++;}else if(frame.kind===\"validated\"){last=e;finals++;}else throw new Error(\"Stream failed: \"+frame.kind);}",
+                  "pm.test(\"One terminal validated event after deltas\",()=>{pm.expect(finals).to.eql(1);pm.expect(deltas).to.be.above(1);pm.expect(frames[frames.length-1].kind).to.eql(\"validated\");pm.expect(last.attempt).to.eql(attempt);});",
+                  "pm.test(\"Complete selected channels match streamed text\",()=>{pm.expect(last.messages).to.have.all.keys(\"sms\",\"email\");pm.expect(last.messages.sms).to.have.all.keys(\"body\");pm.expect(last.messages.email).to.have.all.keys(\"subject\",\"body\");for(const [ch,fields] of Object.entries(last.messages))for(const [field,text] of Object.entries(fields))pm.expect(text).to.eql(parts[ch+\".\"+field]);});",
+                  "pm.test(\"Rendered worst-case limits and allowed placeholders\",()=>{for(const [ch,fields] of Object.entries(last.messages)){const b=last.audience.by_channel[ch];for(const [field,text] of Object.entries(fields)){pm.expect(text.trim()).not.to.eql(\"\");const rendered=text.replace(/\\{\\{(first_name|city)\\}\\}/g,(_,name)=>\"x\".repeat(b.count===0?(name===\"first_name\"?80:120):b[name===\"first_name\"?\"max_first_name_runes\":\"max_city_runes\"]));pm.expect(rendered).not.to.match(/[{}]/);pm.expect(Array.from(rendered).length).to.be.at.most(ch===\"sms\"?160:field===\"subject\"?80:2000);}}});",
+                  "pm.test(\"Aggregate audience only\",()=>{pm.expect(last.audience).to.have.all.keys(\"as_of\",\"eligible_unique\",\"by_channel\");pm.expect(last.audience.by_channel).to.have.all.keys(\"sms\",\"email\");for(const b of Object.values(last.audience.by_channel))pm.expect(b).to.have.all.keys(\"count\",\"max_first_name_runes\",\"max_city_runes\");});",
+                  "pm.variables.set(\"generatedMessages\",JSON.stringify(last.messages));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repeat message preview stream",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200 SSE, no-store\",()=>{pm.response.to.have.status(200);pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/event-stream\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});",
+                  "const frames=pm.response.text().trim().split(/\\r?\\n\\r?\\n/).map(frame=>{const lines=frame.split(/\\r?\\n/);if(lines.length!==2)throw new Error(\"Bad SSE frame\");return {kind:lines[0].replace(/^event: /,\"\"),data:JSON.parse(lines[1].replace(/^data: /,\"\"))};});",
+                  "let attempt=0,parts={},last=null,finals=0,deltas=0;",
+                  "for(const frame of frames){const e=frame.data;if(frame.kind===\"attempt\"){pm.expect(e.attempt).to.eql(attempt+1);attempt=e.attempt;parts={};}else if(frame.kind===\"delta\"){pm.expect(e.attempt).to.eql(attempt);pm.expect([\"sms\",\"email\"]).to.include(e.channel);pm.expect(e.channel===\"sms\"?[\"body\"]:[\"subject\",\"body\"]).to.include(e.field);const key=e.channel+\".\"+e.field;parts[key]=(parts[key]||\"\")+e.text;deltas++;}else if(frame.kind===\"validated\"){last=e;finals++;}else throw new Error(\"Stream failed: \"+frame.kind);}",
+                  "pm.test(\"One terminal validated event after deltas\",()=>{pm.expect(finals).to.eql(1);pm.expect(deltas).to.be.above(1);pm.expect(frames[frames.length-1].kind).to.eql(\"validated\");pm.expect(last.attempt).to.eql(attempt);});",
+                  "pm.test(\"Complete selected channels match streamed text\",()=>{pm.expect(last.messages).to.have.all.keys(\"sms\",\"email\");pm.expect(last.messages.sms).to.have.all.keys(\"body\");pm.expect(last.messages.email).to.have.all.keys(\"subject\",\"body\");for(const [ch,fields] of Object.entries(last.messages))for(const [field,text] of Object.entries(fields))pm.expect(text).to.eql(parts[ch+\".\"+field]);});",
+                  "pm.test(\"Rendered worst-case limits and allowed placeholders\",()=>{for(const [ch,fields] of Object.entries(last.messages)){const b=last.audience.by_channel[ch];for(const [field,text] of Object.entries(fields)){pm.expect(text.trim()).not.to.eql(\"\");const rendered=text.replace(/\\{\\{(first_name|city)\\}\\}/g,(_,name)=>\"x\".repeat(b.count===0?(name===\"first_name\"?80:120):b[name===\"first_name\"?\"max_first_name_runes\":\"max_city_runes\"]));pm.expect(rendered).not.to.match(/[{}]/);pm.expect(Array.from(rendered).length).to.be.at.most(ch===\"sms\"?160:field===\"subject\"?80:2000);}}});",
+                  "pm.test(\"Aggregate audience only\",()=>{pm.expect(last.audience).to.have.all.keys(\"as_of\",\"eligible_unique\",\"by_channel\");pm.expect(last.audience.by_channel).to.have.all.keys(\"sms\",\"email\");for(const b of Object.values(last.audience.by_channel))pm.expect(b).to.have.all.keys(\"count\",\"max_first_name_runes\",\"max_city_runes\");});",
+                  "pm.variables.set(\"generatedMessages\",JSON.stringify(last.messages));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Messages reject scenario body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-messages",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"scenario\":\"happy\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));",
+                  "pm.test(\"Safe error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"body_not_allowed\",path:\"$\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Messages reject invalid id",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/0/generate-messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));",
+                  "pm.test(\"Safe error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"invalid_campaign_id\",path:\"id\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Messages missing campaign",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/9223372036854775807/generate-messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\",()=>pm.response.to.have.status(404));",
+                  "pm.test(\"Safe error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"campaign_not_found\",path:\"$\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Messages reject oversized body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-messages",
+            "body": {
+              "mode": "raw",
+              "raw": "{{oversizedMessageBody}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"oversizedMessageBody\",\" \".repeat(32769));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 413\",()=>pm.response.to.have.status(413));",
+                  "pm.test(\"Safe error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"body_too_large\",path:\"$\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Message generation leaves campaign unchanged",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Still draft with same segment and no saved messages\",()=>{const c=pm.response.json();pm.expect(c.status).to.eql(\"draft\");pm.expect(c.segment).to.deep.eql(JSON.parse(pm.variables.get(\"messageSourceSegment\")));pm.expect(c).not.to.have.property(\"messages\");});"
                 ]
               }
             }

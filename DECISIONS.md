@@ -219,3 +219,20 @@ Record one metadata-only llm_calls row per provider attempt, including failures.
 **Consequences.** The happy fixture is deliberately independent of brief wording. Repeated generations produce the same segment but create new audit rows. Generation does not advance campaign state or trigger sending. Draft state is rechecked at save time; concurrent draft segment edits use last completed save for this case study. Audit storage loss fails closed. Real Claude, content fixtures and SSE remain later work; PostgreSQL queue ADR-006 is unchanged.
 
 **Verification.** Unit/HTTP and PostgreSQL audit/persistence tests passed, including cancellation recording and audit-outage failure. Compose rebuilt and applied migration 003. Local Postman passed 40 requests and 104 assertions. A deliberate validation-bypass mutation made the output-validation test fail; source was restored before final checks. Results are recorded in README.
+
+## ADR-019: Validated message previews over bounded SSE
+Status: Accepted
+
+**Context.** Slice 3B needs mock SMS/email generation that appears incrementally while remaining untrusted until validation. The prior segment runner already supplies repair, retry, timeout and metadata auditing. Message persistence and approval are outside this approved slice.
+
+**Decision.** Add bodyless POST `/campaigns/{id}/generate-messages` for drafts with segments. Use consent-filtered aggregate bounds, versioned prompt/schema and a replaceable streaming message provider. Share bounded call execution with ExtractSegment. Strictly validate complete selected-channel JSON, allowlisted placeholders and rendered rune limits using both independent maxima together. Zero-count channels use database schema bounds; empty audiences can preview but cannot be approved later.
+
+Emit attempt and provisional delta events while the mock produces eight-rune chunks. Every attempt (including a transport retry) resets the client's prior display. Emit validated only after complete domain validation and successful audit recording; otherwise emit a safe terminal error. JSON preflight errors retain normal HTTP statuses; after starting SSE, callers must inspect terminal events. Bound display chunks/total bytes, generation deadlines and socket writes. No content or campaign state is persisted. The final payload includes the preview used for validation, not an approval snapshot.
+
+Migration 004 extends the audit call-name allowlist; previous migrations are immutable. Keep segment and message mock scenarios separate. Cancellation/write failure stops generation; audit cleanup remains bounded and metadata-only.
+
+**Alternatives.** Buffer all output until validation (does not exercise streaming); persist provisional text (unsafe); parse partial forced-tool JSON now (real SDK spike belongs to later Claude integration); introduce WebSockets or a broker (unnecessary for one-way finite streams).
+
+**Consequences.** Deltas may be invalid and must be shown as plain text only. Clients use streaming fetch for POST and treat incomplete streams as failure. No resume/history. Mock content is deterministic, not real brief interpretation. Approval must revalidate current audience/content, and SMS encoding warnings, editing and saved messages are deferred. Real Claude partial-tool decoding is not verified by this mock. PostgreSQL queue ADR-006 remains unchanged.
+
+**Verification.** Domain, LLM and real-socket HTTP tests passed, including flushing before completion, disconnect cancellation, repair resets and no validated event on failure. PostgreSQL migration/audit tests passed. Local Postman passed 49 requests and 127 assertions. Deliberately removing city contributions or disabling flushing made the relevant tests fail; both mutations were restored. Actual evidence and sandbox limitations are recorded in README.

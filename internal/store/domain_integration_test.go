@@ -291,6 +291,72 @@ func TestSeedFailureRollsBack(t *testing.T) {
 	}
 }
 
+func TestMessageGenerationAuditAndPreviewOnly(t *testing.T) {
+	db, ctx := testDatabase(t)
+	if err := Migrate(ctx, db, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	repo := Campaigns{DB: db, Timeout: 5 * time.Second}
+	c, err := repo.Create(ctx, campaign.Draft{Brief: "synthetic message brief", Channels: []string{"sms", "email"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := segment.Parse([]byte(`{"version":1,"all":[{"field":"language","op":"in","value":["tr"]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PutSegment(ctx, c.ID, v); err != nil {
+		t.Fatal(err)
+	}
+	// With no recipients, validation uses schema maxima for each empty channel.
+	audience, err := repo.Preview(ctx, c.ID, time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		scenario string
+		calls    int
+		success  bool
+	}{
+		{"happy", 1, true}, {"repair_succeeds", 2, true}, {"repair_exhausted", 3, false}, {"timeout", 1, false},
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			mock, err := llm.NewMessageMock(tc.scenario, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			timeout := time.Second
+			if tc.scenario == "timeout" {
+				timeout = 5 * time.Millisecond
+			}
+			messages, err := (llm.MessageGenerator{Provider: mock, Recorder: repo, Timeout: timeout}).GenerateMessages(ctx, c.ID, c.Brief, c.Channels, audience, func(string, llm.Event) error { return nil })
+			if (err == nil) != tc.success || (tc.success && len(messages.JSON()) == 0) {
+				t.Fatal("unexpected message outcome", err)
+			}
+			var count, unsafe int
+			if err := db.QueryRowContext(ctx, `SELECT count(*),count(*) FILTER (WHERE call_name <> 'GenerateMessages' OR prompt_version <> 'generate-messages-v1' OR validation_errors::text LIKE '%synthetic%') FROM app.llm_calls WHERE campaign_id=$1`, c.ID).Scan(&count, &unsafe); err != nil || count != tc.calls || unsafe != 0 {
+				t.Fatalf("audit count=%d unsafe=%d err=%v", count, unsafe, err)
+			}
+			stored, err := repo.Get(ctx, c.ID)
+			if err != nil || stored.Status != "draft" || !bytes.Equal(stored.Segment, v.JSON()) {
+				t.Fatal("message preview changed campaign", err)
+			}
+			if _, err := db.ExecContext(ctx, `DELETE FROM app.llm_calls WHERE campaign_id=$1`, c.ID); err != nil {
+				t.Fatal("test audit cleanup failed")
+			}
+		})
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE app.llm_calls`); err != nil {
+		t.Fatal("test audit failure fixture failed")
+	}
+	mock, _ := llm.NewMessageMock("happy", 0)
+	_, err = (llm.MessageGenerator{Provider: mock, Recorder: repo, Timeout: time.Second}).GenerateMessages(ctx, c.ID, c.Brief, c.Channels, audience, func(string, llm.Event) error { return nil })
+	var e *llm.Error
+	if !errors.As(err, &e) || e.Code != "llm_audit_unavailable" {
+		t.Fatal("audit loss did not fail closed", err)
+	}
+}
+
 func TestSeedPersistence(t *testing.T) {
 	db, ctx := testDatabase(t)
 	if err := Migrate(ctx, db, 5*time.Second); err != nil {

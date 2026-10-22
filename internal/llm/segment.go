@@ -41,6 +41,7 @@ type Request struct {
 	Schema    json.RawMessage
 	Tool      string
 	MaxTokens int
+	Channels  []string
 	Feedback  []segment.ValidationError
 }
 
@@ -86,8 +87,6 @@ func (g SegmentGenerator) ExtractSegment(ctx context.Context, id int64, brief st
 	if id < 1 || g.Provider == nil || g.Recorder == nil || g.Timeout <= 0 {
 		return zero, &Error{Code: "llm_unavailable", Path: "$"}
 	}
-	ctx, cancel := context.WithTimeout(ctx, g.Timeout)
-	defer cancel()
 	prompt, err := assets.ReadFile("prompts/extract-segment-v1.txt")
 	if err != nil {
 		return zero, &Error{Code: "llm_unavailable", Path: "$"}
@@ -97,15 +96,23 @@ func (g SegmentGenerator) ExtractSegment(ctx context.Context, id int64, brief st
 		return zero, &Error{Code: "llm_unavailable", Path: "$"}
 	}
 	req := Request{Prompt: string(prompt) + "\n<brief>" + html.EscapeString(brief) + "</brief>", Schema: schema, Tool: "extract_segment", MaxTokens: 8192}
+	return runCall(ctx, id, "ExtractSegment", PromptVersion, g.Timeout, g.Recorder, req, g.Provider.ExtractSegment, segment.Parse)
+}
+
+// runCall shares deadline, repair, retry and audit behavior across both tools.
+func runCall[T any](ctx context.Context, id int64, name, version string, timeout time.Duration, recorder Recorder, req Request, call func(context.Context, Request) (Response, error), validate func([]byte) (T, error)) (T, error) {
+	var zero T
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	for repair := 0; repair <= 2; repair++ {
 		var reasons []segment.ValidationError
-		var validated segment.Validated
+		var validated T
 		for transport := 0; transport <= 1; transport++ {
 			if ctx.Err() != nil {
 				return zero, &Error{Code: "llm_timeout", Path: "$"}
 			}
 			started := time.Now()
-			response, callErr := g.Provider.ExtractSegment(ctx, req)
+			response, callErr := call(ctx, req)
 			outcome := "success"
 			retry := false
 			switch {
@@ -121,7 +128,7 @@ func (g SegmentGenerator) ExtractSegment(ctx context.Context, id int64, brief st
 				if response.Tool != req.Tool {
 					validationErr = segment.Invalid("tool_use_required", "$")
 				} else {
-					validated, validationErr = segment.Parse(response.Input)
+					validated, validationErr = validate(response.Input)
 				}
 				if validationErr != nil {
 					outcome = "llm_output_invalid"
@@ -134,7 +141,7 @@ func (g SegmentGenerator) ExtractSegment(ctx context.Context, id int64, brief st
 			// Preserve a failure record even after request cancellation, with its
 			// own short deadline. No generation/persistence continues afterwards.
 			auditCtx, auditCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			err = g.Recorder.RecordLLMCall(auditCtx, Call{CampaignID: id, Name: "ExtractSegment", PromptVersion: PromptVersion, Outcome: outcome, Errors: reasons, LatencyMS: time.Since(started).Milliseconds(), InputTokens: max(0, response.InputTokens), OutputTokens: max(0, response.OutputTokens)})
+			err := recorder.RecordLLMCall(auditCtx, Call{CampaignID: id, Name: name, PromptVersion: version, Outcome: outcome, Errors: reasons, LatencyMS: time.Since(started).Milliseconds(), InputTokens: max(0, response.InputTokens), OutputTokens: max(0, response.OutputTokens)})
 			auditCancel()
 			if err != nil {
 				return zero, &Error{Code: "llm_audit_unavailable", Path: "$"}

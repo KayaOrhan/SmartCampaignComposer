@@ -22,6 +22,8 @@ services:
       SEED_DATA: "true"
       LLM_PROVIDER: mock
       LLM_MOCK_SCENARIO: happy
+      LLM_MOCK_MESSAGE_SCENARIO: happy
+      LLM_MOCK_CHUNK_DELAY: 10ms
       LLM_TIMEOUT: 10s
     ports:
       - "127.0.0.1:8080:8080"

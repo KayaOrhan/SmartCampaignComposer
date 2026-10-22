@@ -1,6 +1,6 @@
 # Smart Campaign Composer
 
-Slices 1, 2 and 3A implement the Go/PostgreSQL foundation, campaign drafts, fake seed data, validated audience previews and mock brief-to-segment generation. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
+Slices 1, 2, 3A and 3B implement the Go/PostgreSQL foundation, campaign drafts, fake seed data, validated audience previews and mock segment/message generation with SSE previews. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
 
 ## Run
 
@@ -32,9 +32,10 @@ No dotenv loader is used. Later Claude integration must accept `ANTHROPIC_API_KE
 | `GET /campaigns/{id}` | No body | 200 stored campaign |
 | `PUT /campaigns/{id}/segment` | Segment DSL JSON | 200 updated draft |
 | `POST /campaigns/{id}/generate-segment` | No body | 200 updated draft with validated mock segment |
+| `POST /campaigns/{id}/generate-messages` | No body | 200 SSE message preview; details below |
 | `POST /campaigns/{id}/audience-preview` | No body | 200 aggregate preview |
 
-Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segments can only be changed on drafts. There is no message generation, approval or send endpoint yet. Preview without a segment returns 409.
+Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segments can only be changed on drafts. There is no message persistence, approval or send endpoint yet. Preview without a segment returns 409.
 
 Example segment:
 
@@ -97,7 +98,7 @@ Make is now available. Race testing remains blocked by missing CGO/compiler supp
 
 ## Known gaps
 
-- Real Claude, streaming, campaign messages/approval, mock delivery provider, worker, metrics and Vue are not implemented yet. The mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs. Final Compose startup must also include the mock provider.
+- Real Claude, message persistence/editing/approval, mock delivery provider, worker, metrics and Vue are not implemented yet. The mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs. Final Compose startup must also include the mock provider.
 - PostgreSQL remains the queue choice (ADR-006).
 - Local race testing lacks a CGO compiler.
 - Secret scanning detects common formats, not all possible secrets. Claude hooks and session scrubbing remain unverified.
@@ -146,3 +147,36 @@ go test -mod=readonly ./...
 ```
 
 The listed Go packages passed. A deliberate temporary validation bypass made `TestSegmentValidationAndPromptBoundary` fail with `invalid output did not fail closed <nil>`; the original code was restored. Rule 1/boundary validation is covered by `TestSegmentValidationAndPromptBoundary` and `TestMockSegmentScenarios`; Rule 3 by the existing `TestDomain`; Rule 6 by `TestRealLLMForbiddenInTest` and the network-free mock; Rule 9 by the deliberate failure control. Rules 5/7 are supported by metadata-only audit types, error-redaction tests, the repository safety check and explicit Compose template use. No dependency, real LLM request, delivery or commit was introduced. Race testing remains blocked by missing local CGO/compiler support.
+
+## Mock message generation and streaming (3B)
+
+POST `/campaigns/{id}/generate-messages` with an empty body loads a draft with a segment and computes one consent-filtered aggregate audience preview. No recipient records enter the prompt. Tone comes from the brief; the deterministic mock does not interpret it. Messages remain a preview: nothing is saved and campaign state remains draft. Empty audiences may generate previews but cannot be approved in a later approval flow. A zero-count selected channel uses schema bounds (first_name 80, city 120) rather than zero-length substitutions.
+
+The response uses `text/event-stream` and `Cache-Control: no-store`. Consume this POST with streaming fetch, not the GET-only EventSource constructor. Each frame has an `event:` line and a JSON `data:` line followed by a blank line:
+
+- `attempt`: `{ "attempt": 1 }`. Discard all prior displayed deltas whenever a new attempt starts, including transport retries.
+- `delta`: `{ "attempt": 1, "channel": "sms", "field": "body", "text": "Merhaba " }`. Append plain text to that field for the current attempt only. Display using textContent, never HTML; partial output is provisional and must not be approved.
+- `validated`: terminal `{ "attempt": 1, "messages": { ... }, "audience": { ... } }`. Contains the complete validated templates for exactly the selected channels and the aggregate preview used for validation. Replace displayed deltas with this payload.
+- `error`: terminal `{ "attempt": 1, "error": { "code": "llm_output_invalid", "path": "$", "reasons": [ ... ] } }`. Discard provisional output. Error reasons contain codes/paths only.
+
+Request/state/database failures before streaming use the normal JSON error contract (404/409/413/422/503). Once streaming begins, HTTP remains 200 and generation errors use the terminal event, so status alone does not mean success. A closed or interrupted stream without a terminal event is a failure. Disconnects cancel the provider; failed writes stop generation. The generation deadline bounds the entire sequence and the stream has an absolute write deadline. Metadata auditing retains the bounded cancellation-cleanup budget from 3A. There is no automatic resume or SSE event history.
+
+Message JSON rejects duplicate/case-mismatched/unknown keys, unselected or missing channels, nulls, invalid types and UTF-8, NULs, malformed/unknown placeholders and trailing JSON. Every field is nonempty. The validator counts rendered runes using BOTH maximum first_name and city lengths together for every occurrence. SMS body is limited to 160, email subject to 80, email body to 2000. These are preview-time bounds, not a frozen approval snapshot: later persistence/approval must revalidate current content, audience and consent. SMS encoding/segment estimates are deferred with persistence/UI; the hard assignment limit is enforced.
+
+`LLM_MOCK_MESSAGE_SCENARIO` defaults to `happy`; supported scenarios are `happy`, `sms_too_long`, `subject_too_long`, `unknown_field`, `unknown_variable`, `extra_keys`, `no_tool_use`, `refusal`, `timeout`, `rate_limited`, `repair_succeeds`, `repair_exhausted`. `LLM_MOCK_CHUNK_DELAY` defaults to `10ms` (0s to 1s). The mock emits eight-rune chunks before final validation. These are startup/test controls, never request fields. Segment generation retains its separate scenario setting. No API key, SDK, new dependency, real API or delivery is used. Migration 004 expands the existing audit call-name constraint to include GenerateMessages; prior migrations remain unchanged.
+
+### 3B verification (2026-10-22)
+
+Executed `make check` (repository safety/formatting, vet and all unit tests), `make test-integration` (local disposable PostgreSQL), Compose API rebuild and the documented local Postman collection command. Postman passed 49 requests and 127 assertions, zero failures, exit 0. It checked SSE framing, reconstruction of final messages from current-attempt deltas, both rendered maxima, repeat generation, missing segment and rejected request preservation. PostgreSQL tests verified migration 004, per-attempt GenerateMessages audit records and unchanged draft/segment, including repair exhaustion, timeout and audit loss.
+
+Actual check output:
+
+```text
+repository safety and formatting checks passed
+go vet -mod=readonly ./...
+go test -mod=readonly ./...
+```
+
+Go packages passed without an API key. Real-socket HTTP tests separately proved flushing before provider completion and disconnect cancellation. The initial sandbox run blocked loopback connections; the same tests passed with approved local-network execution. No tests were skipped. A deliberate omission of city maxima failed SMS, repeated-variable, subject, email-body and zero-count bound tests. Disabling Flush failed `TestSSEFlushesBeforeGenerationCompletes` with a client timeout awaiting headers; sources were restored before final checks.
+
+Safety coverage: message boundary/length rules are covered by `TestMessageValidation`; Rule 1 and strict output/repair boundaries by `TestMockMessageScenarios`, existing segment tests and the shared runner; Rule 3 by the existing consent-aware `TestDomain`; Rule 5 by metadata-only call records, safe error payloads and repository scanning; Rule 6 by the mock-only provider guard and key-free tests; Rule 9 by both deliberate failing controls. Cancellation, transport errors and preview-only state are exercised by the HTTP and PostgreSQL tests. No dependency, real external API, recipient contact output, message persistence, approval or delivery was introduced. Race testing remains blocked by the existing missing CGO compiler.
