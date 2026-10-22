@@ -21,6 +21,14 @@ type fakeCampaignStore struct {
 }
 
 func (f *fakeCampaignStore) called(ctx context.Context) { f.calls++; _, f.deadline = ctx.Deadline() }
+func (f *fakeCampaignStore) Metrics(ctx context.Context) (campaign.Metrics, error) {
+	f.called(ctx)
+	return campaign.Metrics{Deliveries: map[string]campaign.DeliveryCounts{"sms": {Pending: 2, InFlight: 1, Sent: 4}}, Calls: []campaign.CallMetric{{Call: "ExtractSegment", Outcome: "success", Count: 3, ValidationFailures: 2}, {Call: "private-value", Outcome: "private-value", Count: 99}}}, f.err
+}
+func (f *fakeCampaignStore) List(ctx context.Context, before int64, limit int) (campaign.Page, error) {
+	f.called(ctx)
+	return campaign.Page{Campaigns: []campaign.Campaign{}}, f.err
+}
 func (f *fakeCampaignStore) Create(ctx context.Context, d campaign.Draft) (campaign.Campaign, error) {
 	f.called(ctx)
 	return campaign.Campaign{ID: 1, Revision: 1, Brief: d.Brief, Channels: d.Channels, Status: "draft"}, f.err

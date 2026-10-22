@@ -91,7 +91,7 @@ func check(root string) error {
 			return nil
 		}
 		ext := filepath.Ext(path)
-		if ext != ".go" && ext != ".md" && ext != ".sql" && ext != ".yml" && ext != ".json" && ext != ".sh" && filepath.Base(path) != "go.mod" && filepath.Base(path) != "Dockerfile" && filepath.Base(path) != "Makefile" && filepath.Base(path) != ".env.example" {
+		if ext != ".go" && ext != ".md" && ext != ".sql" && ext != ".yml" && ext != ".json" && ext != ".sh" && ext != ".ts" && ext != ".vue" && ext != ".css" && ext != ".html" && filepath.Base(path) != "go.mod" && filepath.Base(path) != "Dockerfile" && filepath.Base(path) != "Makefile" && filepath.Base(path) != ".env.example" {
 			return nil
 		}
 		body, err := os.ReadFile(path)

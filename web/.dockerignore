@@ -1,0 +1,14 @@
+*
+!package.json
+!package-lock.json
+!index.html
+!tsconfig.json
+!vite.config.ts
+!src/
+!src/**
+!nginx.conf
+**/.env
+**/.env.*
+**/*.pem
+**/id_rsa
+**/id_ed25519

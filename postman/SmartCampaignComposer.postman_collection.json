@@ -3288,6 +3288,87 @@
           ]
         }
       ]
+    },
+    {
+      "item": [
+        {
+          "name": "List campaigns",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"bounded newest-first campaign page\", () => { pm.response.to.have.status(200); const p=pm.response.json(); pm.expect(p.campaigns).to.be.an(\"array\"); pm.expect(p.campaigns.length).to.be.at.most(1); pm.expect(p).to.have.property(\"next_before\"); if(p.campaigns.length) { pm.expect(p.campaigns[0]).to.have.all.keys(\"id\",\"revision\",\"brief\",\"channels\",\"segment\",\"status\",\"created_at\"); pm.variables.set(\"listBefore\",p.campaigns[0].id); } });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns?limit=1"
+          }
+        },
+        {
+          "name": "List cursor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"cursor excludes newer campaigns\", () => { pm.response.to.have.status(200); const p=pm.response.json(); pm.expect(p.campaigns.length).to.be.at.most(2); p.campaigns.forEach(c=>pm.expect(c.id).to.be.below(Number(pm.variables.get(\"listBefore\")))); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns?before={{listBefore}}&limit=2"
+          }
+        },
+        {
+          "name": "Reject oversized list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"invalid pagination fails closed\", () => { pm.response.to.have.status(422); pm.expect(pm.response.json().error.code).to.equal(\"invalid_pagination\"); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns?limit=101"
+          }
+        },
+        {
+          "name": "Aggregate metrics",
+          "event": [
+            {
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Prometheus aggregate metrics without recipient fields\", () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/plain; version=0.0.4\"); const text=pm.response.text(); for(const name of [\"deliveries{\",\"queue_depth{\",\"llm_calls_total{\",\"llm_validation_failures_total{\"]) pm.expect(text).to.include(name); for(const privateField of [\"user_id\",\"destination\",\"first_name\",\"campaign_id\",\"subject\",\"body\"]) pm.expect(text).not.to.include(privateField); for(const line of text.split(\"\\n\").filter(x=>x && !x.startsWith(\"#\"))) pm.expect(line).to.match(/^[a-z_]+\\{[a-z_]+=\"[A-Za-z_]+\"(?:,[a-z_]+=\"[A-Za-z_]+\")*\\} [0-9]+$/); });"
+                ]
+              },
+              "listen": "test"
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/metrics",
+            "header": []
+          }
+        }
+      ],
+      "name": "Campaign dashboard reads"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # Smart Campaign Composer
 
-The backend implements fake seed data, validated audience previews, segment/message generation, revision-conditional persistence/editing, atomic approval/enqueueing and a PostgreSQL worker with mock delivery. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
+Vue 3 + TypeScript campaign management, validated AI audience/message suggestions, explicit human editing and approval, and a PostgreSQL queue with mock delivery. The dashboard shows delivery progress and aggregate metrics. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
 
 ## Run
 
@@ -10,7 +10,7 @@ Install Docker with Compose and start its Linux container engine. From the repos
 docker compose up
 ```
 
-Compose builds missing images, waits for PostgreSQL health, and starts the API on `127.0.0.1:8080`, mock provider on `127.0.0.1:8081` and a separate worker. PostgreSQL is not exposed to the host. The `app` credentials are disposable local development defaults. Data persists in a named volume. After source changes, use `docker compose up --build` to rebuild existing images. The API owns migrations; worker/provider fail closed and restart if their schema is not ready during startup.
+Compose builds missing images, waits for PostgreSQL health, and starts the frontend on `127.0.0.1:5173`, API on `127.0.0.1:8080`, mock provider on `127.0.0.1:8081` and a separate worker. PostgreSQL is not exposed to the host. The `app` credentials are disposable local development defaults. Data persists in a named volume. After source changes, use `docker compose up --build` to rebuild existing images. The API owns migrations; worker/provider fail closed and restart if their schema is not ready during startup.
 
 ```sh
 curl -i http://localhost:8080/health
@@ -24,10 +24,30 @@ Configuration uses environment variables only: `DATABASE_URL` (required), `HTTP_
 
 No dotenv loader is used. Compose passes explicitly configured `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` to the API in Anthropic mode; agents never inspect `.env`. Mock mode remains the default.
 
+No environment file or API key is needed for a fresh mock demonstration. To avoid automatic loading of a local dotenv file, use `docker compose --env-file .env.example up --build`. Keep `LLM_PROVIDER=mock`; inherited shell variables override the template. Automated review explicitly selected `APP_ENV=test` and cleared the API key. For real Claude configuration, the operator supplies their own `ANTHROPIC_API_KEY` through Compose environment interpolation (a local ignored dotenv file or exported variable), selects `LLM_PROVIDER=anthropic` and uses a non-test `APP_ENV`. Automated tests never exercise that mode.
+
+## Architecture and demo
+
+The Vue SPA calls the Go API through a same-origin nginx `/api` proxy. The API validates Claude tool output, compiles the segment DSL with bound SQL parameters, and stores campaigns in PostgreSQL. Human saves and approval use revision tokens; approval freezes personalized payloads and enqueues them atomically. A separate Go worker consumes the PostgreSQL queue, rechecks consent, and calls only the mock provider. Shared database admission limits each channel; the durable mock ledger deduplicates retries. The dashboard polls persisted progress; metrics expose fixed-label aggregates.
+
+1. Open [Campaign Studio](http://127.0.0.1:5173), select SMS and email, and create a brief such as: "A short, friendly 30% offer for Istanbul users who added to cart but did not purchase in the last 30 days."
+2. Generate the segment and preview audience counts. Mock mode returns the documented sample segment regardless of brief wording.
+3. Generate messages and watch the provisional stream become a validated suggestion. Edit the SMS or email subject, then click **Save messages**.
+4. Click **Review current audience**, inspect counts/content and check the human-review checkbox. Click **Approve & start mock delivery**.
+5. Watch pending/in-flight jobs become sent/dead/skipped until completed. Return to the list and open **View metrics**. Completed means all jobs are terminal, not that every job succeeded.
+
+The final requirement matrix, current test evidence and release checklist are in [docs/SUBMISSION_REVIEW.md](docs/SUBMISSION_REVIEW.md). Authentic sanitized development transcripts and provenance are in [ai-sessions/INDEX.md](ai-sessions/INDEX.md).
+
 ## Campaign API
+
+Open [Campaign Studio](http://127.0.0.1:5173) for the complete demo: create a brief with SMS/email channels, generate a segment, preview consent-filtered counts, generate messages, edit and explicitly save, review the current audience, then approve mock delivery. The delivery panel shows pending/in-flight/sent/dead/skipped jobs and stops polling when the campaign completes. Completion can include dead/skipped jobs. Generated previews are plain text and never implicitly saved or approved.
+
+For frontend development with the Compose API already running: `npm --prefix web ci --ignore-scripts`, then `npm --prefix web run dev`. Stop the Compose web service first if it occupies port 5173. Both Vite and nginx proxy /api to the Go API; nginx disables buffering for SSE. No browser secrets or dotenv files are required.
 
 | Method and path | Request | Success |
 | --- | --- | --- |
+| `GET /campaigns` | Optional positive `before` ID and `limit` (default 20, maximum 100) | 200 `{campaigns: [...], next_before: number or null}`, descending ID |
+| `GET /metrics` | No body | 200 Prometheus text aggregates; 503 if PostgreSQL is unavailable |
 | `POST /campaigns` | JSON `brief` and `channels` | 201 draft plus Location header |
 | `GET /campaigns/{id}` | No body | 200 stored campaign |
 | `PUT /campaigns/{id}/segment` | Segment DSL JSON, required If-Match | 200 updated draft |
@@ -38,6 +58,19 @@ No dotenv loader is used. Compose passes explicitly configured `ANTHROPIC_API_KE
 | `PUT /campaigns/{id}/messages` | JSON messages envelope, required If-Match | 200 saved, revalidated content_ready templates |
 | `POST /campaigns/{id}/approve` | JSON approval_fingerprint, required If-Match | 200 approval receipt and persisted queue counts |
 | `GET /campaigns/{id}/delivery-status` | No body | 200 PostgreSQL progress counts, no recipient details |
+
+List query values must be canonical positive decimal integers. Unknown/duplicate parameters, invalid encodings and limits above 100 return 422 invalid_pagination. Pass next_before as the next before cursor; null means the last page. Concurrent inserts do not shift the remaining pages. The list has no recipient information and does not provide a campaign mutation ETag; fetch the chosen campaign for its revision.
+
+GET /metrics returns Prometheus text format 0.0.4 with no-store caching. It reads one bounded, read-only repeatable-read database snapshot and exposes only fixed-label aggregates:
+
+| Metric | Meaning |
+| --- | --- |
+| `deliveries{channel,status}` (gauge) | Current persisted jobs in each of pending, in_flight, sent, dead and skipped, including zero values |
+| `queue_depth{channel}` (gauge) | Pending plus in-flight jobs, including retry waits |
+| `llm_calls_total{call,outcome}` (counter) | Audited provider attempts, including retries/repairs; call is ExtractSegment or GenerateMessages |
+| `llm_validation_failures_total{call}` (counter) | Number of recorded schema/domain validation errors, not failed campaigns or individual recipients |
+
+Counters persist across process restarts and reset when the database is reset. Metrics include no campaign/user identifiers, arbitrary error text, destinations or message payloads. Proposed attempt-outcome/provider-latency series are not emitted because the existing records cannot establish them. The case study requires metrics but does not prescribe specific series. Health/readiness remain unchanged.
 
 Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segment and content changes are allowed in draft/content_ready only. Preview without a segment returns 409. Approval/enqueueing and mock delivery execution are implemented.
 
@@ -85,15 +118,18 @@ See [postman/README.md](postman/README.md) for the local generate/save/edit/reva
 
 ## Tests and checks
 
-Install Go 1.27 and GNU Make; Docker is needed for integration tests.
+Install Go 1.27, GNU Make and Node 22.12+ (or Node 24+); Docker is needed for integration tests. Install pinned frontend tooling once with `npm --prefix web ci --ignore-scripts`.
 
 ```sh
 make test
 make check
 make test-integration
+make test-web
 ```
 
-Unit tests require no database, external API or API key. Initial downloads of pinned modules require registry access. `make check` runs safety/format checks, `go vet` and unit tests. The scanner rejects tracked secret paths without reading their contents and checks safe source files for known key patterns and hidden Unicode; matching values are never printed.
+Browser tests exercise the running Compose stack with mock LLM/delivery and synthetic briefs only. Install Chromium once with `npm --prefix web exec -- playwright install chromium`, then run `npm --prefix web run test:e2e`. They cover the complete two-channel journey to terminal delivery, a competing HTTP save producing a UI 412/reconciliation flow, and mobile overflow. Run against a mock/test stack, never an Anthropic configuration. Existing backlog can extend completion times; run browser and Postman journeys sequentially for predictable timing. Screenshots stay in ignored web/test-results.
+
+Unit tests require no database, external API or API key. Initial downloads of pinned modules require registry access. `make test` runs Go and Vue tests. `make check` also runs safety/format checks, `go vet` and strict Vue/TypeScript checks. `make test-web` builds the production frontend and runs its tests. The scanner rejects tracked secret paths without reading their contents and checks safe source files, including TypeScript/Vue/CSS/HTML, for known key patterns and hidden Unicode; matching values are never printed.
 
 Integration tests create the dedicated disposable `scc_test` database if needed and reset only its test schema/tables. Do not store valuable data there. They verify migration upgrade/repeat/rollback, consent-aware matching, event boundaries, duplicate-event handling, draft restrictions, injection-safe queries and seed repeat/rollback. The test image is rebuilt to include current source. No local filesystem is mounted into that container.
 
@@ -113,7 +149,9 @@ Without Make, equivalent local checks are:
 ```sh
 go run ./scripts
 go vet -mod=readonly ./...
+npm --prefix web run typecheck
 go test -mod=readonly ./...
+npm --prefix web test
 ```
 
 For agent-run Compose checks use `docker compose --env-file .env.example ...` or set `COMPOSE_DISABLE_ENV_FILE=1` to avoid automatic reads of user secrets. The user launch command remains plain `docker compose up`.
@@ -128,19 +166,21 @@ Executed successfully on 2026-10-21: Go unit tests, vet, safety/format checks, m
 
 Slice 2 checks executed on 2026-10-21: `make check` passed (safety/formatting, vet and all unit tests); `make test-integration` passed against local PostgreSQL. Docker rebuilt and upgraded the existing database; aggregate SQL confirmed `5000` users, one seed marker and two migration records. HTTP smoke checks observed create=201, segment save=200, preview=200 and invalid-field rejection=422 with the prior stored segment preserved. The sample preview returned 727 distinct eligible recipients (SMS 467, email 571); these are illustrative, time-dependent counts. A deliberate consent-filter mutation made `TestLLMOutputNeverReachesSQL` fail; the original source was restored and the test passed.
 
-Make is now available. Race testing remains blocked by missing CGO/compiler support. The bundled skill validator passed (`Skill is valid!`) using verified, pinned PyYAML 6.0.3 installed only in a temporary tooling directory; no Python dependency was added to the project. The skill's description limits were also checked separately. Full assignment functionality is not implemented or verified.
+Make is now available. Race testing remains blocked by missing CGO/compiler support. The bundled skill validator passed (`Skill is valid!`) using verified, pinned PyYAML 6.0.3 installed only in a temporary tooling directory; no Python dependency was added to the project. The skill's description limits were also checked separately. These are historical foundation results; current submission coverage is recorded in [docs/SUBMISSION_REVIEW.md](docs/SUBMISSION_REVIEW.md).
 
 ## Known gaps
 
-- Metrics endpoints, dashboard push updates and Vue remain unimplemented. Delivery progress is available through PostgreSQL-backed GET delivery-status. The Claude adapter is tested against local protocol fixtures; live model access, latency and account-specific compatibility remain unverified. The mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs.
+- The Claude adapter is tested against local protocol fixtures; live model access, latency and account-specific compatibility remain unverified. The default mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs. The UI states this limitation.
+- The delivery dashboard polls every 2 seconds, backing off to 5 seconds on errors; push updates are not required by the assignment. System metrics refresh on demand. Current database records do not support complete per-attempt outcome history or provider-latency metrics; those proposed metrics are deferred rather than estimated. SMS segment estimates describe the template only; personalization can change encoding/segments.
+- This is a local demonstration without authentication or authorization. The UI has no persistent unsaved-draft storage, campaign deep links, campaign cancellation controls, or offline mode. After a conflict it retains the local draft read-only until explicit discard/reload; it never rebases and retries automatically. Browser navigation/reload discards unsaved edits.
 - Channel dispatch is serialized across processes and deliberately waits until each HTTP response plus 10 ms; slow calls reduce throughput. PostgreSQL advisory locks require direct/session-preserving connections (no transaction-pooling proxy). Default lease recovery may take 30 seconds. Provider acceptance and worker acknowledgement are separate commits: an accepted but unacknowledged final attempt can be reported dead after a crash. The acceptance ledger prevents duplicate simulated effects; it is not proof of delivery by a real provider. No real delivery provider is supported.
 - Revisions protect campaign writes, not mutable profiles/consents; validation snapshots are historical. Full content history, authenticated editor identity and generated-content provenance are absent. A lost save response requires GET/reconciliation, not blind retry with a fresh revision.
 - SDK malformed SSE event-envelope JSON currently maps to unavailable rather than the tool-validation repair path. Transient retries use a fixed 100 ms delay; up to six provider attempts share one generation deadline. Real-model repair effectiveness and timing remain unverified.
 - PostgreSQL remains the queue choice (ADR-006).
 - Local race testing lacks a CGO compiler.
-- Secret scanning detects common formats, not all possible secrets. Claude hooks and session scrubbing remain unverified.
-- Current `.gitignore` excludes all `ai-sessions/`; narrow this to raw exports before preparing sanitized submission records.
-- Later domain limitations remain in ADR-002/005/013/014: abandonment approximation, SMS segment estimates, final consent race, per-channel ownership and conservative rendering bounds.
+- Secret scanning detects common formats, not all possible secrets, and scans working-file contents rather than staged blobs. Review the staged diff independently before a future commit. Claude hooks have not been exercised in a Claude session. The required session scrubber was executed successfully during submission review; raw exports remain ignored.
+- Development used Codex; the author confirmed that no separate Claude Code/claude.ai sessions exist. Sanitized public Codex transcripts disclose omitted tool traffic and injected context. They are not fabricated Claude exports or a complete machine-event archive.
+- Domain/delivery limitations remain in ADR-002/005/014/024: abandonment approximation, SMS segment estimates, final consent race, direct PostgreSQL sessions and conservative rendering bounds. ADR-024 supersedes the earlier single-owner-per-channel assumption.
 - Scheduling, A/B variants, per-user language and CI are optional and deferred.
 
 ## Slice 2.1 verification (2026-10-22)
@@ -374,3 +414,36 @@ The PostgreSQL tests cover successful completion/revision preservation; transien
 A separate Compose SIGKILL smoke test observed an abandoned active lease, restarted worker and mock provider, then completed all 1597 jobs with unchanged campaign revision. A SQL aggregate comparison confirmed total mock acceptances equalled sent rows. Graceful stop/start was also exercised. No recipient payload or destination was printed. Unit tests assert cancellation does not acknowledge ambiguous work. Temporarily accepting permanent HTTP failures as successful responses made the 400/401/409/422 classification regressions fail; the source was restored and checked green.
 
 Safety coverage: Rules 1/3 retain the trusted compiler and current-approval regressions, with TestFinalConsentAfterGateWait and TestConsentAndProviderStorageFailClosed proving final dispatch boundaries. Rule 2 is covered by TestRetryPolicyAndMockClient allowlist checks and TestMockIngressAndLimits synthetic destination checks. Rule 4 is covered by TestConcurrentClaimsAndWorkers, TestDeliveryCrashFencingAndProviderRestart and the hard-stop aggregate check. Rules 5/7 use metadata-only logs, aggregate HTTP contracts and the repository scanner; no protected configuration was read. Rule 6 retains mock/test mode and the existing real-client construction guard. Rule 9 has the deliberate classification failure control. No new dependency, RULES.md edit, real Anthropic/SMS/email call or commit. Sandbox loopback/Docker denials were rerun with approved access, without skipping tests. Race-detector execution remains unavailable with the existing missing CGO compiler. Actual implementation diff review: No findings.
+
+## Frontend/dashboard/metrics verification (2026-10-22)
+
+Implemented the approved milestone with Vue 3, strict TypeScript and Vite, a typed fetch API client, cancellable POST SSE, explicit template saves, reviewed revision/fingerprint approval, responsive list/detail screens, polling delivery counts and aggregate metrics. Compose builds and serves the frontend on port 5173. No existing mutation contract, queue algorithm, schema or Go dependency changed.
+
+Executed successfully:
+
+- Production frontend build and strict vue-tsc check, locally and in the pinned Node/nginx Docker image.
+- make check: repository safety/format scan, go vet, all Go unit/HTTP regressions, strict TypeScript and 17 frontend tests across 5 files.
+- Full Docker PostgreSQL integration suite, including cursor stability under concurrent creation, empty pages, persisted LLM/error aggregates and pending/terminal delivery aggregates; existing delivery/approval/consent/retry/migration tests remained green.
+- Full local mock/test Postman run: 217 requests and 582 assertions, zero failures, exit 0. Totals include completion polling. After final pagination hardening and Docker recovery, the affected dashboard folder passed 4 requests/4 assertions again.
+- All 3 Playwright Chromium tests on the final rebuilt frontend: complete two-channel journey through terminal delivery; real competing HTTP save causing 412 and explicit UI reconciliation; 390-pixel mobile layout without horizontal overflow. Final run: 3 passed (26.7s). The earlier full browser run also passed while sharing the mock queue with Postman.
+- Desktop and mobile screenshots visually inspected. The final synthetic campaign completed 1,010 jobs, all acknowledged by the mock provider, with zero pending/in-flight/dead/skipped jobs. Counts are time-dependent seed observations, not fixture constants.
+- git diff --check and a separate review of the actual implementation changes. No findings remain.
+
+Actual final check output included:
+
+```text
+repository safety and formatting checks passed
+npm --prefix web run typecheck
+> vue-tsc --noEmit
+go test -mod=readonly ./...
+Test Files  5 passed (5)
+     Tests  17 passed (17)
+```
+
+Frontend tests cover split UTF-8/CRLF framing, repair-attempt resets, incomplete/error/invalid streams, cancellation, explicit review, stale-save preservation without automatic retry, changed fingerprints, incoherent snapshots, empty audiences, polling completion/retry/cleanup, and GSM-extension/Unicode SMS estimates. Temporarily removing the explicit human-review guard made the corresponding test fail; restoring the source made it pass. No failing test was skipped or weakened.
+
+Safety coverage: Rules 1/3/4 retain the compiler, consent, revision, approval and queue regressions. Rules 2/6 retain mock/test startup, mock-only provider transport and real-client test construction guards; browser and collection runs used synthetic briefs with the mock LLM/provider. Rules 5/7 are covered by fixed-label metrics, aggregate-only HTTP/Postman checks, safe error tests and expanded frontend source scanning. Rule 8 is covered by verified npm maintainer/repository metadata, exact dependency pins/lockfile and official image digests (ADR-025). Rule 9 includes the deliberately failing review-guard control. No real Anthropic, SMS or email request was made.
+
+Environment failures were handled separately: sandbox loopback tests passed after approved local-network access; an unsupported Postman folder flag was corrected to the documented item selector. On session continuation Docker's engine was unavailable, causing connection-refused browser/Postman runs before any application assertion. After Docker recovered and /api/ready returned ready, both suites passed. No database volume was reset and no application behavior was changed to hide these failures.
+
+This historical milestone deferred exports, ADR reconciliation and final review; those are now recorded in [docs/SUBMISSION_REVIEW.md](docs/SUBMISSION_REVIEW.md). Live Claude verification remains unperformed and requires explicit authorization; the fixture-backed adapter and mock journey are verified. Local race detection still lacks the existing CGO/compiler requirement. No commit was created.

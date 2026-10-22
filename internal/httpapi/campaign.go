@@ -18,6 +18,8 @@ import (
 )
 
 type CampaignStore interface {
+	Metrics(context.Context) (campaign.Metrics, error)
+	List(context.Context, int64, int) (campaign.Page, error)
 	Create(context.Context, campaign.Draft) (campaign.Campaign, error)
 	Get(context.Context, int64) (campaign.Campaign, error)
 	PutSegment(context.Context, int64, int64, segment.Validated) (campaign.Campaign, error)
@@ -45,6 +47,8 @@ func registerCampaigns(mux *http.ServeMux, store CampaignStore, now func() time.
 		}
 	}
 	mux.HandleFunc("POST /campaigns", bounded(a.create))
+	mux.HandleFunc("GET /campaigns", bounded(a.list))
+	mux.HandleFunc("GET /metrics", bounded(a.metrics))
 	mux.HandleFunc("GET /campaigns/{id}", bounded(a.get))
 	mux.HandleFunc("PUT /campaigns/{id}/segment", bounded(a.putSegment))
 	mux.HandleFunc("POST /campaigns/{id}/audience-preview", bounded(a.preview))

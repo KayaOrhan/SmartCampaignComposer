@@ -57,14 +57,20 @@ Approved scope: implement the approval and PostgreSQL queue portions of the exis
 - Checks: unit/HTTP, Docker PostgreSQL races, same-count audience changes, multi-batch rollback, cancellation and 5000-user seed; local mock/test Postman passed 97 requests and 232 assertions. Full evidence is in README.
 - No mock provider, worker, rate limiter, retry/recovery execution, frontend, real API calls or commits. Queue lifecycle columns prepare the next original milestone; they do not prove worker guarantees.
 
-## Later slices
+## Submission status
 
-1. Live Claude smoke verification only when explicitly authorized; independent of backend delivery work.
-3. PostgreSQL deliveries milestone: implemented worker and mock provider as described below; verification evidence is in README.
-4. Vue interface, dashboard and metrics; final verification and sanitized session exports.
+The original core milestones are implemented: backend/domain, Claude adapter with mock verification, explicit editing/approval, PostgreSQL worker/mock delivery, Vue interface, dashboard and metrics. Final review reconciles decision statuses, documents requirement coverage and exports authentic sanitized Codex conversations. See [docs/SUBMISSION_REVIEW.md](docs/SUBMISSION_REVIEW.md) for executed checks and the release checklist. This is submission work, not a new feature slice. Historical scope descriptions above describe each increment when it was approved.
+
+Live Claude smoke verification remains unperformed and requires explicit authorization. Scheduling, A/B variants, per-user language and CI remain optional/deferred.
 
 Each slice needs its own approved file plan. Final plain `docker compose up` must include seed and mock provider; tests require no real API key. Bonus scope remains deferred. No commits without explicit approval.
 
+## Vue frontend, campaign dashboard and metrics
+
+Approved on 2026-10-22 after reviewing the case study and existing API contracts. Implemented increments: (1) Vue/strict TypeScript/Vite list/create, cursor-paginated GET campaigns, tests and Compose web service; (2) readable audience criteria, cancellable POST SSE, explicit full-set editing/saves and revision/fingerprint review; (3) approval, polling delivery dashboard and aggregate Prometheus metrics from existing tables; (4) frontend/component/browser, Go/PostgreSQL and local Postman verification plus documentation. See ADR-025 and README for final behavior, evidence and remaining submission work.
+
+Changed scope: web source/tests/tooling and Docker proxy; additive campaign list/metrics domain-store-HTTP files and tests; maintained Postman collection; Compose/Make/safety-scanner integration; README, decisions, plan and session index. No migration, real service call, queue redesign, protected-file access or commit.
+
 ## PostgreSQL queue worker and mock delivery
 
-Approved continuation of the original deliveries milestone, not a new numbered slice. Implemented incrementally: queue claim/fenced acknowledgement/recovery transactions; durable deterministic mock HTTP provider; context-bounded worker/client with final consent check and shared channel admission; Compose wiring; unit/PostgreSQL/Postman verification. Migration 008 adds the mock acceptance/attempt/rate-window tables, channel admission state, expired-lease index and five-attempt constraint. API status names and campaign revisions remain unchanged. See ADR-024 and README for transaction boundaries, failure semantics and verification. Vue, metrics/push dashboard updates, real model smoke checks and session exports remain later work.
+Approved continuation of the original deliveries milestone, not a new numbered slice. Implemented incrementally: queue claim/fenced acknowledgement/recovery transactions; durable deterministic mock HTTP provider; context-bounded worker/client with final consent check and shared channel admission; Compose wiring; unit/PostgreSQL/Postman verification. Migration 008 adds the mock acceptance/attempt/rate-window tables, channel admission state, expired-lease index and five-attempt constraint. API status names and campaign revisions remain unchanged. See ADR-024 and README for transaction boundaries, failure semantics and verification. The later Vue milestone implemented the dashboard and metrics through polling (ADR-025); final export/review status is recorded above.

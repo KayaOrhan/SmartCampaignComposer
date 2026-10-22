@@ -1,5 +1,7 @@
 # Local API regression collection
 
+Current dashboard additions: the Campaign dashboard reads folder verifies bounded campaign listing, cursor ordering, oversized-limit rejection and fixed-label aggregate Prometheus metrics without recipient fields. GET /campaigns and GET /metrics are additive; existing mutation, SSE and approval contracts are unchanged. Canonical contracts are in [README.md](../README.md); current submission results are in [docs/SUBMISSION_REVIEW.md](../docs/SUBMISSION_REVIEW.md). Historical results below describe each collection version when it was executed.
+
 `SmartCampaignComposer.postman_collection.json` is a Postman Collection v2.1 artifact for the implemented Go HTTP API. Import it in Postman or run it with the official Postman CLI (verified with version 1.75.0). No workspace binding, login, API key, custom skill or additional runner dependency is required for this local collection.
 
 From the repository root, start or rebuild the local API:
@@ -8,7 +10,7 @@ From the repository root, start or rebuild the local API:
 $env:LLM_PROVIDER="mock"
 $env:APP_ENV="test"
 $env:ANTHROPIC_API_KEY=$null
-docker compose --env-file .env.example up -d --build api
+docker compose --env-file .env.example up -d --build api web mockprovider worker
 ```
 
 Wait until `http://127.0.0.1:8080/ready` returns HTTP 200. Startup applies migrations and seeds synthetic data once. Then run:
@@ -23,7 +25,7 @@ Run the entire collection in order. `baseUrl` defaults to the loopback API; a co
 
 Coverage includes all implemented routes: health, readiness, create/get campaign, save segment, audience preview, segment generation and message streaming. Assertions cover canonical channels and segment values, draft persistence, Location, UTC timestamps, JSON/no-store headers, aggregate-only preview fields and union/count bounds. Negative cases check malformed/duplicate JSON, unknown fields, invalid channels/brief/ID, missing campaigns, content type, body size, forbidden consent filters, preview bodies and missing segments. A rejected segment update must preserve the stored segment. The missing-campaign check uses the maximum signed 64-bit ID as an absent fixture, never as a generated resource ID.
 
-Audience counts are deliberately not fixed: seeded events age, and consent/profile edits are preserved. These HTTP assertions do not independently prove consent filtering; PostgreSQL domain tests cover that guarantee. Database-outage 503 and non-draft 409 cases remain covered by Go tests because this API cannot safely create those states through its public endpoints. The 3A folder covers mock segment generation, read/preview/repeat behavior and rejected body/ID/missing-campaign cases. Invalid model output, repairs, timeout, refusal and audit failures are covered by Go tests using internal scenario selection. The 3B folder parses finite SSE responses, reconstructs current-attempt fields, validates the final payload and rune limits, and checks repeat/unchanged-draft behavior and preflight errors. Message persistence/editing is covered by the 3D folder below; approval, delivery and metrics remain unimplemented. No real LLM or delivery service is called.
+Audience counts are deliberately not fixed: seeded events age, and consent/profile edits are preserved. These HTTP assertions do not independently prove consent filtering; PostgreSQL domain tests cover that guarantee. Database-outage 503 and non-draft 409 cases remain covered by Go tests because this API cannot safely create those states through its public endpoints. The 3A folder covers mock segment generation, read/preview/repeat behavior and rejected body/ID/missing-campaign cases. Invalid model output, repairs, timeout, refusal and audit failures are covered by Go tests using internal scenario selection. The 3B folder parses finite SSE responses, reconstructs current-attempt fields, validates the final payload and rune limits, and checks repeat/unchanged-draft behavior and preflight errors. Message persistence/editing is covered by the 3D folder below; approval, delivery and metrics are covered by the subsequent folders. No real LLM or delivery service is called.
 
 The canonical maintenance policy already exists in [AGENTS.md](../AGENTS.md#api-contract--postman-testing). Update this collection alongside API contract changes, using the official Postman plugin workflow. The Go handlers and domain contracts define implemented behavior.
 

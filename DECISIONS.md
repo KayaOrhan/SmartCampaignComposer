@@ -4,12 +4,12 @@ Architecture decision records for Smart Campaign Composer. Newest decisions go a
 
 Status values: `Proposed` (reasoned, not yet proven by code), `Accepted` (built and verified), `Superseded`.
 
-> Draft written 2026-10-21 before implementation. Every entry starts as `Proposed`. Change each one to `Accepted` only after the code and its test exist, and rewrite any entry that reality proved wrong. A DECISIONS.md the author cannot defend line by line is worse than none.
+> Initial draft written 2026-10-21 before implementation. Statuses were reconciled against code and executed checks during final submission review on 2026-10-23. Original contexts, alternatives and rationale remain historical; later ADRs and explicit status notes qualify changed details. Accepted does not imply live Claude verification. See docs/SUBMISSION_REVIEW.md.
 
 ---
 
 ## ADR-001: Stack: Go, Postgres, Vue 3 with TypeScript
-Status: Proposed
+Status: Accepted (2026-10-23). Stack and Compose services are implemented and covered by the final mock workflow; see docs/SUBMISSION_REVIEW.md.
 
 **Context.** The brief requires Vue.js on the frontend and Go or PHP on the backend. Database and queue are open. The system needs concurrency (workers, rate limiting), strong typing for validated LLM output, and few moving parts to run with one `docker compose up`.
 
@@ -20,7 +20,7 @@ Status: Proposed
 **Consequences.** Fewer dependencies and one source of truth. The Go standard library routing means a little more code than a framework. Postgres is the throughput ceiling for the queue, which is far above 100 messages per second per channel.
 
 ## ADR-002: Audience as a constrained JSON DSL, never SQL
-Status: Proposed
+Status: Accepted (2026-10-23). Strict DSL/compiler and PostgreSQL injection/consent tests pass; the documented purchase approximation remains.
 
 **Context.** Claude must turn "last 30 days, Istanbul, added to cart, did not buy" into an audience. The brief forbids running LLM output as SQL.
 
@@ -33,7 +33,7 @@ Status: Proposed
 **Verification.** `TestLLMOutputNeverReachesSQL`, plus an injection fixture.
 
 ## ADR-003: Structured output through forced tool use, validated, with a bounded repair loop
-Status: Proposed
+Status: Accepted (2026-10-23). Forced-tool validation and bounded repair are implemented (ADR-018/019/020). The original reason-labelled metric proposal below is superseded by the audited call-labelled aggregates in ADR-025.
 
 **Context.** The output must be structured, checked in the backend, and reliable.
 
@@ -44,7 +44,7 @@ Status: Proposed
 **Consequences.** Latency and cost can grow by up to two extra calls in bad cases. Validation failures are measurable through `llm_validation_failures_total{reason}`, which shows where the prompt needs work.
 
 ## ADR-004: Streaming to the browser over SSE, approval only after validation
-Status: Proposed
+Status: Accepted (2026-10-23). Message SSE is implemented and socket/browser tested. Approval additionally requires explicit save and current human review under ADR-022/023/025; a validated event alone does not enable it.
 
 **Context.** Messages should appear while they are generated, but incomplete or invalid content must never be approvable.
 
@@ -55,7 +55,7 @@ Status: Proposed
 **Consequences.** Streaming forced tool calls produces partial JSON, so extracting display text mid-stream is the riskiest implementation detail. It gets a spike before the UI is built. If the spike fails, fall back to streaming per completed field.
 
 ## ADR-005: SMS length: hard limit 160 characters, with an encoding warning
-Status: Proposed
+Status: Accepted (2026-10-23), with the informational estimate limited to template text under ADR-025. Backend rendered rune limits are enforced; there is no backend sms_segments response field.
 
 **Context.** The spec says 160 characters. Turkish letters such as `ş`, `ğ`, `ı` force UCS-2 encoding, where one SMS segment holds 70 characters. The audience is Turkish.
 
@@ -70,7 +70,7 @@ Status: Accepted; implemented as one-row claims. See ADR-024 and README verifica
 
 **Context.** An asynchronous queue is required. The `deliveries` rows already need durable state and uniqueness.
 
-**Decision.** `deliveries` is the queue. Workers claim batches with `FOR UPDATE SKIP LOCKED`.
+**Decision.** `deliveries` is the queue. The original proposal claimed batches with `FOR UPDATE SKIP LOCKED`; the implemented worker claims one row at a time under ADR-024.
 
 **Alternatives.** Redis list or streams, NATS, RabbitMQ.
 
@@ -108,7 +108,7 @@ Status: Accepted; attempts count processing claims and errors are safe codes. Se
 **Consequences.** Permanent failures surface on the dashboard quickly. A campaign can complete with `dead` rows, and the dashboard shows them separately.
 
 ## ADR-010: Testing without external network or API key
-Status: Proposed
+Status: Accepted (2026-10-23). Key-free unit/HTTP, PostgreSQL, browser and Postman checks passed. Shared admission tests use database time under ADR-024 rather than an injected process clock.
 
 **Decision.** The LLM sits behind an interface. A mock serves fixture scenarios, including failures (invalid JSON shape, over-long copy, refusal, timeout, 429). Time is injected. The mock provider is a real HTTP service so integration tests exercise the real client, limiter and retry code. `APP_ENV=test` makes the real Anthropic client refuse to construct.
 
@@ -117,14 +117,14 @@ Status: Proposed
 **Consequences.** `make test` runs anywhere. Fixture scenarios double as living documentation of failure modes.
 
 ## ADR-011: Scope
-Status: Proposed
+Status: Accepted (2026-10-23). Core workflow is implemented; optional bonuses remain deferred and documented in README.
 
 **Decision.** Build the core flow end to end on mocks first, then harden, then polish the UI. Bonus items (scheduled send, A/B variants, per-user language, CI) are out unless the core is solid and verified. Cuts are written in README "Known gaps".
 
 **Consequences.** A smaller, defensible submission instead of a wide, shaky one.
 
 ## ADR-012: How AI was used and how its output is verified
-Status: Proposed
+Status: Accepted (2026-10-23) for the documented AI-assisted workflow and authentic Codex evidence. The author confirmed no separate Claude sessions exist. Exports disclose omitted tool traffic; hooks are not claimed verified. See ai-sessions/INDEX.md.
 
 **Decision.** Agents write most code inside a context I maintain: `CLAUDE.md`, `RULES.md` and skills hold the domain contract, safety rules and gotchas. Plans are reviewed before implementation. I keep decisions about the segment DSL, validation rules, idempotency and retry design. Safety rules are enforced by tests and a hook, not by instructions alone. Each session ends with a four-line entry in `ai-sessions/INDEX.md`: delegated, kept, where the agent was wrong, how I caught it.
 
@@ -163,7 +163,7 @@ Status: Accepted; implemented with reviewed approval snapshots (ADR-023) and fin
 **Verification.** Cover maxima from different recipients, repeated variables, Unicode rune counting, every field limit and profile changes between preview and approval.
 
 ## ADR-015: Backend foundation and single-instance startup migrations
-Status: Proposed
+Status: Accepted (2026-10-23). Foundation/migration tests and fresh-database startup pass. The historical scratch image description below covers the foundation increment; the current image also contains worker and mockprovider binaries (ADR-024).
 
 **Context.** The seven-day case study needs a working foundation without a migration framework. The assignment is authoritative for product requirements; the required launch command is plain `docker compose up`.
 
@@ -175,7 +175,7 @@ Apply trusted, embedded, numbered SQL files in lexical order in one startup tran
 
 **Consequences.** Pools have 10 open/5 idle connections. Database operations have deadlines; errors omit raw driver details to avoid leaking credentials. The scratch runtime contains only the API binary; current Compose database traffic is local without TLS. Foundation logs have no campaign or delivery identifiers because those entities do not exist yet. Later slices retain the PostgreSQL queue decision in ADR-006.
 
-**Verification.** Endpoint/config tests, safety checks, PostgreSQL migration apply/repeat/rollback tests, Docker startup and database outage/recovery probes. See README for actual results. Keep this record Proposed until required checks pass.
+**Verification.** Endpoint/config tests, safety checks, PostgreSQL migration apply/repeat/rollback tests, Docker startup and database outage/recovery probes. See README for actual results. The original promotion condition was to keep this record Proposed until those checks passed; it is now satisfied for the documented foundation scope. Current executed checks are in docs/SUBMISSION_REVIEW.md.
 
 ## ADR-016: Draft campaigns and consent-aware segment previews
 Status: Superseded by ADR-022
@@ -318,3 +318,23 @@ The separate mock HTTP service derives deterministic faults from key/attempt/see
 **Alternatives.** In-memory provider deduplication loses safety on restart. Per-process rate limiters multiply capacity. Holding database transactions across HTTP keeps locks open and couples provider latency to queue transactions. Lease renewal for every running HTTP call is unnecessary because configured provider timeout is strictly shorter than the lease; waiting claims do renew. A broker, generic job framework, full attempt-history table and frontend are unnecessary here.
 
 **Consequences.** Per-channel HTTP is deliberately serialized; latency reduces throughput. Durable mock state shares PostgreSQL for this case study and is not a real-provider integration. At-least-once attempts plus provider deduplication prevent duplicate acceptance, but accepted final attempts can remain unacknowledged and become dead after crash exhaustion. No promise of universally exact delivery status is made. Consent changes after its final check still race with external dispatch as previously documented. Recovery uses database time; pacing/HTTP deadline tests target the synchronized local runtime. This supersedes ADR-013's single-replica admission implementation and completes the implemented queue/retry/mock-provider portions of ADR-006/007/009/014; metrics and dashboard push remain separate work.
+
+## ADR-025: Vue workflow with explicit review and aggregate observability
+
+Status: Accepted (2026-10-22); frontend, browser, Go/PostgreSQL and Postman evidence is recorded in README.
+
+**Context.** The assignment requires Vue, streamed message suggestions, human approval, live delivery status, metrics and health endpoints. It specifies neither metric names nor dashboard push transport. Existing API writes require campaign revisions; approval also requires the current audience fingerprint. No list or metrics endpoint existed.
+
+**Decision.** Build a Vue 3/strict TypeScript/Vite SPA with native fetch, small task-focused components and one campaign composable. No router, store library or UI framework is needed for list/detail navigation. A same-origin /api proxy in Vite and nginx preserves POST SSE, disables buffering and keeps credentials out of browser code. Vite dotenv loading is disabled. Render all generated/user text through Vue interpolation or form values, never HTML.
+
+Use a bounded fetch SSE reader, cancel on navigation, reset provisional content on each provider attempt, and reject incomplete/malformed streams. A validated suggestion still requires an explicit full-set save using its base_revision. Save/segment edits invalidate review; approval requires matching saved validation, a fresh fingerprint, a nonempty audience and a human checkbox. On 409/412 refresh server state, retain local text read-only and require explicit reconciliation and renewed review. Never silently attach a fresh revision to stale content.
+
+Add GET /campaigns with descending primary-key cursors (default 20, maximum 100) and GET /metrics with PostgreSQL aggregate reads. Reuse delivery-status for campaign polling every 2 seconds, with 5-second retry on errors, no overlapping polls, cancellation on unmount and stop at terminal campaign status. This replaces the delivery skill's proposed dashboard SSE transport for this milestone, per the explicitly approved polling scope; message generation remains SSE.
+
+Metrics use current-state deliveries and queue_depth gauges, audited llm_calls_total and llm_validation_failures_total counters. Labels are fixed channel/state/call/outcome values, with no campaign/user IDs, arbitrary error text or content. Counters survive process restarts and reset with the database. Current job state is not a cumulative sent-attempt counter. Attempt-outcome history and provider latency cannot be reconstructed reliably and are deferred. Exact metric semantics and API contracts are in README.
+
+**Dependencies.** Verified exact versions, maintainers and source repositories on the npm registry before installation: vue 3.5.44 (Vue maintainers), vite 8.3.5 and @vitejs/plugin-vue 6.0.10 (Vite maintainers), typescript 5.9.3 (Microsoft), vue-tsc 3.3.13 (Vue language-tools), vitest 5.0.5, @vue/test-utils 2.5.1, happy-dom 21.0.4 (David Ortner), and @playwright/test 1.64.1 (Microsoft Playwright). Exact direct pins and transitive integrity hashes are in web/package-lock.json. Only Vue ships as a runtime dependency. Official Node/nginx images were verified through the registry and pinned by digest. No Go dependency or database migration was added.
+
+**Alternatives.** EventSource cannot POST. WebSockets or dashboard SSE add machinery with no assignment requirement. Browser-only campaign history loses existing campaigns. A frontend state framework or general query cache adds indirection to one list/detail flow. In-memory metrics would lose history on restart and disagree with durable queue state.
+
+**Consequences.** Local demonstration only; no authentication, persistent drafts or deep links. Safe conflict handling trades automatic merging for explicit reconciliation. Displayed aggregate metrics are operational snapshots, not real-delivery guarantees. Tests and verification evidence are recorded in README.
