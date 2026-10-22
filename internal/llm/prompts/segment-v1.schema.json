@@ -1,0 +1,148 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "all"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "all": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "op",
+              "value"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "city"
+                ]
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "in"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 20,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "op",
+              "value"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "language"
+                ]
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "in"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 20,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 16
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "op",
+              "value"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "cart_added"
+                ]
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "within_days"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 365
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "field",
+              "op",
+              "value"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "enum": [
+                  "purchase"
+                ]
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "within_days",
+                  "none_within_days"
+                ]
+              },
+              "value": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 365
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

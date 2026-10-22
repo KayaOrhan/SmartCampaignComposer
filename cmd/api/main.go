@@ -12,6 +12,7 @@ import (
 
 	"github.com/KayaOrhan/SmartCampaignComposer/internal/config"
 	"github.com/KayaOrhan/SmartCampaignComposer/internal/httpapi"
+	"github.com/KayaOrhan/SmartCampaignComposer/internal/llm"
 	"github.com/KayaOrhan/SmartCampaignComposer/internal/store"
 	"github.com/KayaOrhan/SmartCampaignComposer/seed"
 )
@@ -39,6 +40,10 @@ func run(ctx context.Context, logger *slog.Logger) (result error) {
 	if err != nil {
 		return err
 	}
+	mock, err := llm.NewMock(cfg.LLMMockScenario)
+	if err != nil {
+		return err
+	}
 	db, err := store.Open(ctx, cfg.DatabaseURL, cfg.DBTimeout)
 	if err != nil {
 		return err
@@ -57,7 +62,7 @@ func run(ctx context.Context, logger *slog.Logger) (result error) {
 		}
 	}
 	repo := store.Campaigns{DB: db, Timeout: cfg.DBTimeout}
-	srv := &http.Server{Addr: cfg.Address, Handler: httpapi.Handler(db.PingContext, cfg.DBTimeout, repo), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 60 * time.Second}
+	srv := &http.Server{Addr: cfg.Address, Handler: httpapi.Handler(db.PingContext, cfg.DBTimeout, repo, llm.SegmentGenerator{Provider: mock, Recorder: repo, Timeout: cfg.LLMTimeout}, cfg.LLMTimeout+2*cfg.DBTimeout), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: cfg.LLMTimeout + 2*cfg.DBTimeout + 5*time.Second, IdleTimeout: 60 * time.Second}
 	stopped := make(chan error, 1)
 	go func() { stopped <- srv.ListenAndServe() }()
 	logger.Info("api starting", "address", cfg.Address)

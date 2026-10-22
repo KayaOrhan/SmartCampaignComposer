@@ -204,3 +204,18 @@ Status: Accepted
 **Trade-off.** Internal parsing accepts larger encodings of valid documents while remaining bounded. Removing validation or raising the public request limit would weaken the contract unnecessarily.
 
 **Verification.** Unit, HTTP, PostgreSQL and maintained Postman regressions; actual execution results are recorded in README.
+
+## ADR-018: Mock segment generation through a validated provider boundary
+Status: Accepted
+
+**Context.** Slice 3A needs a key-free end-to-end brief-to-segment path before adding the real Claude SDK, copy generation or streaming. The existing DSL and draft save operation already enforce validation, consent-safe compilation and draft state.
+
+**Decision.** Add bodyless POST `/campaigns/{id}/generate-segment`. Load the stored brief, call the fixture-backed mock through a replaceable provider interface, validate tool input using the existing strict parser, and save through PutSegment. Version the prompt and tool schema. Allow two validation repairs and a separate one-time retry for transient/rate-limited transport errors per attempt, all under one generation deadline. Public requests cannot select scenarios. Fail unsupported provider configuration at startup; real-provider construction remains forbidden in tests.
+
+Record one metadata-only llm_calls row per provider attempt, including failures. The audit write uses a separate two-second cleanup deadline after cancellation; audit failure prevents saving. A successful call record describes provider validation, not a guarantee that the subsequent campaign save succeeds. Migration 003 is additive; previous migrations are unchanged.
+
+**Alternatives.** Implement heuristic natural-language parsing (misrepresents a mock as intelligence); add the Claude SDK now (outside 3A); expose fault scenarios in HTTP input (test controls would become product API); hold a database transaction across generation (long locks).
+
+**Consequences.** The happy fixture is deliberately independent of brief wording. Repeated generations produce the same segment but create new audit rows. Generation does not advance campaign state or trigger sending. Draft state is rechecked at save time; concurrent draft segment edits use last completed save for this case study. Audit storage loss fails closed. Real Claude, content fixtures and SSE remain later work; PostgreSQL queue ADR-006 is unchanged.
+
+**Verification.** Unit/HTTP and PostgreSQL audit/persistence tests passed, including cancellation recording and audit-outage failure. Compose rebuilt and applied migration 003. Local Postman passed 40 requests and 104 assertions. A deliberate validation-bypass mutation made the output-validation test fail; source was restored before final checks. Results are recorded in README.

@@ -34,7 +34,7 @@ func TestEndpoints(t *testing.T) {
 					t.Error("missing database deadline")
 				}
 				return tc.dbErr
-			}, time.Second, nil)
+			}, time.Second, nil, nil, time.Second)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
 			if w.Code != tc.status {
@@ -64,7 +64,7 @@ func TestReadinessTimeoutAndCancellation(t *testing.T) {
 				cancel()
 			}
 			var got error
-			h := Handler(func(ctx context.Context) error { <-ctx.Done(); got = ctx.Err(); return got }, time.Millisecond, nil)
+			h := Handler(func(ctx context.Context) error { <-ctx.Done(); got = ctx.Err(); return got }, time.Millisecond, nil, nil, time.Second)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ready", nil).WithContext(ctx))
 			want := context.DeadlineExceeded

@@ -11,6 +11,13 @@ func TestLoad(t *testing.T) {
 		name, key, value string
 		valid            bool
 	}{
+		{"mock provider", "LLM_PROVIDER", "mock", true},
+		{"unimplemented real provider", "LLM_PROVIDER", "anthropic", false},
+		{"unknown provider", "LLM_PROVIDER", "other", false},
+		{"llm timeout", "LLM_TIMEOUT", "1s", true},
+		{"invalid llm timeout", "LLM_TIMEOUT", "invalid", false},
+		{"zero llm timeout", "LLM_TIMEOUT", "0s", false},
+		{"excessive llm timeout", "LLM_TIMEOUT", "31s", false},
 		{"defaults", "", "", true},
 		{"address", "HTTP_ADDR", "127.0.0.1:9000", true},
 		{"bad port", "HTTP_ADDR", ":70000", false},
@@ -47,5 +54,14 @@ func TestLoad(t *testing.T) {
 				t.Fatal("seed flag not applied")
 			}
 		})
+	}
+}
+
+func TestRealLLMForbiddenInTest(t *testing.T) {
+	_, err := Load(func(key string) string {
+		return map[string]string{"DATABASE_URL": "postgres://localhost/app", "APP_ENV": "test", "LLM_PROVIDER": "anthropic"}[key]
+	})
+	if err == nil || err.Error() != "real LLM provider forbidden in test" {
+		t.Fatal("test provider guard missing")
 	}
 }

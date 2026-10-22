@@ -1,0 +1,28 @@
+{
+  "tool": "extract_segment",
+  "input": {
+    "version": 1,
+    "all": [
+      {
+        "field": "city",
+        "op": "in",
+        "value": [
+          "Istanbul"
+        ]
+      },
+      {
+        "field": "cart_added",
+        "op": "within_days",
+        "value": 30
+      },
+      {
+        "field": "purchase",
+        "op": "none_within_days",
+        "value": 30
+      }
+    ]
+  },
+  "refusal": false,
+  "input_tokens": 0,
+  "output_tokens": 0
+}

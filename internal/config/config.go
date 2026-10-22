@@ -9,10 +9,13 @@ import (
 )
 
 type Config struct {
-	Address     string
-	DatabaseURL string
-	DBTimeout   time.Duration
-	SeedData    bool
+	Address         string
+	DatabaseURL     string
+	DBTimeout       time.Duration
+	SeedData        bool
+	LLMProvider     string
+	LLMMockScenario string
+	LLMTimeout      time.Duration
 }
 
 func Load(getenv func(string) string) (Config, error) {
@@ -40,6 +43,25 @@ func Load(getenv func(string) string) (Config, error) {
 			return Config{}, errors.New("SEED_DATA must be true or false")
 		}
 		c.SeedData = raw == "true"
+	}
+
+	c.LLMProvider = getenv("LLM_PROVIDER")
+	if c.LLMProvider == "" {
+		c.LLMProvider = "mock"
+	}
+	if c.LLMProvider != "mock" {
+		if getenv("APP_ENV") == "test" && c.LLMProvider == "anthropic" {
+			return Config{}, errors.New("real LLM provider forbidden in test")
+		}
+		return Config{}, errors.New("only mock LLM provider is implemented")
+	}
+	c.LLMMockScenario = getenv("LLM_MOCK_SCENARIO")
+	c.LLMTimeout = 10 * time.Second
+	if raw := getenv("LLM_TIMEOUT"); raw != "" {
+		c.LLMTimeout, err = time.ParseDuration(raw)
+		if err != nil || c.LLMTimeout <= 0 || c.LLMTimeout > 30*time.Second {
+			return Config{}, errors.New("LLM_TIMEOUT must be positive and at most 30s")
+		}
 	}
 	return c, nil
 }

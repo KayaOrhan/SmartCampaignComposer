@@ -979,6 +979,231 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Mock brief-to-segment (3A)",
+      "item": [
+        {
+          "name": "Generate mock segment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"generatedSegment\",\"{\\\"version\\\":1,\\\"all\\\":[{\\\"field\\\":\\\"city\\\",\\\"op\\\":\\\"in\\\",\\\"value\\\":[\\\"istanbul\\\"]},{\\\"field\\\":\\\"cart_added\\\",\\\"op\\\":\\\"within_days\\\",\\\"value\\\":30},{\\\"field\\\":\\\"purchase\\\",\\\"op\\\":\\\"none_within_days\\\",\\\"value\\\":30}]}\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Validated generated segment\",()=>{const c=pm.response.json();pm.expect(c.id).to.eql(Number(pm.variables.get(\"campaignId\")));pm.expect(c.status).to.eql(\"draft\");pm.expect(c.segment).to.deep.eql(JSON.parse(pm.variables.get(\"generatedSegment\")));});",
+                  "pm.test(\"JSON and no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read generated segment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Validated generated segment\",()=>{const c=pm.response.json();pm.expect(c.id).to.eql(Number(pm.variables.get(\"campaignId\")));pm.expect(c.status).to.eql(\"draft\");pm.expect(c.segment).to.deep.eql(JSON.parse(pm.variables.get(\"generatedSegment\")));});",
+                  "pm.test(\"JSON and no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Preview generated segment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/audience-preview"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Aggregate preview\",()=>{const p=pm.response.json();pm.expect(p.eligible_unique).to.be.a(\"number\");pm.expect(p.by_channel).to.have.all.keys(\"sms\",\"email\");pm.expect(p).to.have.all.keys(\"as_of\",\"eligible_unique\",\"by_channel\");});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repeat mock generation",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Validated generated segment\",()=>{const c=pm.response.json();pm.expect(c.id).to.eql(Number(pm.variables.get(\"campaignId\")));pm.expect(c.status).to.eql(\"draft\");pm.expect(c.segment).to.deep.eql(JSON.parse(pm.variables.get(\"generatedSegment\")));});",
+                  "pm.test(\"JSON and no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generation rejects scenario body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"scenario\":\"repair_exhausted\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));",
+                  "pm.test(\"Safe generation error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"body_not_allowed\",path:\"$\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generation rejects invalid id",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/0/generate-segment"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\",()=>pm.response.to.have.status(422));",
+                  "pm.test(\"Safe generation error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"invalid_campaign_id\",path:\"id\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generation missing campaign",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/9223372036854775807/generate-segment"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\",()=>pm.response.to.have.status(404));",
+                  "pm.test(\"Safe generation error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"campaign_not_found\",path:\"$\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generation rejects oversized body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/generate-segment",
+            "body": {
+              "mode": "raw",
+              "raw": "{{generationOversizedBody}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.variables.set(\"generationOversizedBody\",\" \".repeat(32769));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 413\",()=>pm.response.to.have.status(413));",
+                  "pm.test(\"Safe generation error\",()=>pm.expect(pm.response.json().error).to.deep.eql({code:\"body_too_large\",path:\"$\"}));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rejected generation preserves segment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"Validated generated segment\",()=>{const c=pm.response.json();pm.expect(c.id).to.eql(Number(pm.variables.get(\"campaignId\")));pm.expect(c.status).to.eql(\"draft\");pm.expect(c.segment).to.deep.eql(JSON.parse(pm.variables.get(\"generatedSegment\")));});",
+                  "pm.test(\"JSON and no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

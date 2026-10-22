@@ -20,6 +20,9 @@ services:
       HTTP_ADDR: :8080
       DB_TIMEOUT: 2s
       SEED_DATA: "true"
+      LLM_PROVIDER: mock
+      LLM_MOCK_SCENARIO: happy
+      LLM_TIMEOUT: 10s
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

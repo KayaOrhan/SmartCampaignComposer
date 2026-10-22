@@ -1,6 +1,6 @@
 # Smart Campaign Composer
 
-Slices 1 and 2 implement the Go/PostgreSQL foundation, campaign drafts, fake seed data and validated audience previews. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
+Slices 1, 2 and 3A implement the Go/PostgreSQL foundation, campaign drafts, fake seed data, validated audience previews and mock brief-to-segment generation. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
 
 ## Run
 
@@ -31,9 +31,10 @@ No dotenv loader is used. Later Claude integration must accept `ANTHROPIC_API_KE
 | `POST /campaigns` | JSON `brief` and `channels` | 201 draft plus Location header |
 | `GET /campaigns/{id}` | No body | 200 stored campaign |
 | `PUT /campaigns/{id}/segment` | Segment DSL JSON | 200 updated draft |
+| `POST /campaigns/{id}/generate-segment` | No body | 200 updated draft with validated mock segment |
 | `POST /campaigns/{id}/audience-preview` | No body | 200 aggregate preview |
 
-Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segments can only be changed on drafts. There is no generation, approval or send endpoint yet. Preview without a segment returns 409.
+Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segments can only be changed on drafts. There is no message generation, approval or send endpoint yet. Preview without a segment returns 409.
 
 Example segment:
 
@@ -45,7 +46,7 @@ The [campaign-domain skill](.claude/skills/campaign-domain/SKILL.md) specifies a
 
 Preview returns `as_of`, `eligible_unique` (the union across selected channels), and `by_channel` with `count`, `max_first_name_runes` and `max_city_runes`. Both maxima are independent, even when different recipients supply them. No recipient rows or contact details are returned. A repeatable-read transaction keeps channel counts consistent; this is not an approval snapshot.
 
-JSON requests require Content-Type `application/json`. Validation rejects duplicate or unknown keys, wrong types, invalid UTF-8 and trailing values. Error responses have the form `{"error":{"code":"unsupported_field","path":"all[0].field"}}`, without echoing submitted values or driver errors. Statuses: 400 malformed JSON, 413 oversized body, 422 invalid contract, 404 missing campaign, 409 invalid state/missing segment, 503 database unavailable.
+Requests containing JSON require Content-Type `application/json`. Validation rejects duplicate or unknown keys, wrong types, invalid UTF-8 and trailing values. Error responses have the form `{"error":{"code":"unsupported_field","path":"all[0].field"}}`, without echoing submitted values or driver errors. Statuses: 400 malformed JSON, 413 oversized body, 422 invalid contract, 404 missing campaign, 409 invalid state/missing segment, 503 database unavailable.
 
 ## Tests and checks
 
@@ -96,7 +97,7 @@ Make is now available. Race testing remains blocked by missing CGO/compiler supp
 
 ## Known gaps
 
-- Claude, streaming, campaign messages/approval, mock provider, worker, metrics and Vue are not implemented yet. Final Compose startup must also include the mock provider.
+- Real Claude, streaming, campaign messages/approval, mock delivery provider, worker, metrics and Vue are not implemented yet. The mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs. Final Compose startup must also include the mock provider.
 - PostgreSQL remains the queue choice (ADR-006).
 - Local race testing lacks a CGO compiler.
 - Secret scanning detects common formats, not all possible secrets. Claude hooks and session scrubbing remain unverified.
@@ -121,3 +122,27 @@ go test -mod=readonly ./...
 All listed Go packages passed. Temporarily changing the document parser back to the ingress cap caused `TestDocumentRoundTrip` to fail with `canonical round trip failed body_too_large at $`; source was restored before the final checks. The changed domain skill passed the bundled validator (`Skill is valid!`) using the existing temporary PyYAML tooling installation.
 
 Safety coverage: Rule 1 and boundary validation are exercised by `TestValidation`, `TestDocumentRoundTrip` and `TestLLMOutputNeverReachesSQL`; Rule 3 remains covered by `TestDomain`; repeat-safe persistence is covered by `TestSegmentPersistenceRoundTrip`. Rules 5/7 are supported by the repository safety check and explicit Compose template use. Rule 9 is supported by the deliberate failing regression control. No external LLM/provider calls or new dependencies were introduced. Race testing remains blocked by the existing missing CGO compiler. The local collection creates one persistent synthetic draft per full run.
+
+## Mock brief-to-segment (3A)
+
+POST `/campaigns/{id}/generate-segment` with no body uses the stored draft brief and replaces its segment only after successful validation and call recording. The response is the same campaign representation as GET. Repeat calls keep the same deterministic segment; each invocation creates fresh call records. Concurrent draft edits use last completed save; draft state is rechecked under lock at save time. There is no database lock held during generation. Preview remains a separate request.
+
+`LLM_PROVIDER` defaults to `mock`; other providers fail startup, including `anthropic` under `APP_ENV=test`. No API key is needed or read by this implementation. `LLM_TIMEOUT` defaults to `10s` and must be positive and at most `30s`; it bounds the entire generation sequence. `LLM_MOCK_SCENARIO` defaults to `happy`; supported segment scenarios are `happy`, `unknown_field`, `extra_keys`, `no_tool_use`, `refusal`, `timeout`, `rate_limited`, `repair_succeeds` and `repair_exhausted`. These are startup/test controls, never request fields. Compose selects `happy`. The mock returns fixtures independently of brief wording; it is a test adapter, not a language parser.
+
+The provider interface receives the versioned prompt, forced tool name, schema, token bound and safe validation feedback. Every tool input goes through the existing strict DSL validator. There are at most two validation repairs and one transport retry per attempt for rate-limit/transient failures, with bounded backoff. No model output is executed. Failed output or refusal returns 502; timeout/cancellation returns 504; unavailable provider or audit storage returns 503. Validation exhaustion adds `error.reasons`, an array of safe code/path pairs. No raw model/driver error is returned. Failures preserve the previous segment.
+
+Migration 003 adds `app.llm_calls`: campaign ID, call name, prompt version, outcome, safe validation errors, latency, token counts and UTC creation time. Each provider attempt has a record, including transport retries and timeout failures. Mock token counts are zero, not estimated production usage. No briefs, prompts, raw outputs or recipient records are stored in this table. A failed audit insert prevents segment persistence. Cancellation audit writes have a separate bounded two-second cleanup budget; if storage is unavailable, a durable record cannot be guaranteed and the request fails closed.
+
+### 3A verification (2026-10-22)
+
+Executed `make check` (safety/formatting, vet and unit tests), `make test-integration` (local disposable PostgreSQL), Compose API rebuild and the documented local Postman collection run. PostgreSQL tests cover migration upgrade/repeat/rollback, happy and repaired generation persistence, exhausted repairs preserving the prior segment, per-attempt audit counts, cancellation audit and audit outage. Postman passed 40 requests and 104 assertions, zero failures, exit 0, including generation/read/preview/repeat and rejection of scenario bodies, bad IDs, missing campaigns and oversized bodies. Reporting stayed local.
+
+Actual check output:
+
+```text
+repository safety and formatting checks passed
+go vet -mod=readonly ./...
+go test -mod=readonly ./...
+```
+
+The listed Go packages passed. A deliberate temporary validation bypass made `TestSegmentValidationAndPromptBoundary` fail with `invalid output did not fail closed <nil>`; the original code was restored. Rule 1/boundary validation is covered by `TestSegmentValidationAndPromptBoundary` and `TestMockSegmentScenarios`; Rule 3 by the existing `TestDomain`; Rule 6 by `TestRealLLMForbiddenInTest` and the network-free mock; Rule 9 by the deliberate failure control. Rules 5/7 are supported by metadata-only audit types, error-redaction tests, the repository safety check and explicit Compose template use. No dependency, real LLM request, delivery or commit was introduced. Race testing remains blocked by missing local CGO/compiler support.

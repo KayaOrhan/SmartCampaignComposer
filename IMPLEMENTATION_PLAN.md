@@ -29,9 +29,13 @@ Approved scope: versioned domain migration, campaign drafts, deterministic 5000-
 
 Approved scope: preserve the 32768-byte HTTP ingress cap; revalidate canonical and PostgreSQL JSONB documents with a separate 262144-byte cap and identical DSL checks. Cover HTML escaping and JSONB whitespace expansion with unit, PostgreSQL and Postman round-trip regressions, including repeat save, preview and oversized HTTP rejection. No new endpoints, dependencies or migrations. Verification results belong in README.
 
+## Slice 3A: Mock brief-to-segment
+
+Approved scope: fixture-backed replaceable LLM provider, versioned segment prompt/schema, existing strict DSL validation, at most two repairs, bounded transient retry and timeout, metadata-only call audit (migration 003), and bodyless POST `/campaigns/{id}/generate-segment`. Persist only valid results on drafts, with state rechecked after generation. Include Go/PostgreSQL and maintained Postman tests. No SDK, real API calls, messages, approval, streaming or delivery implementation. See ADR-018 and README for behavior and verification evidence.
+
 ## Later slices
 
-1. Mock LLM contracts, campaign messages/edit/approval, Claude integration and streamed messages.
+1. Campaign messages/edit/approval, real Claude integration and streamed messages.
 3. PostgreSQL deliveries queue (ADR-006), worker, retries, idempotency and fault-injecting mock provider.
 4. Vue interface, dashboard and metrics; final verification and sanitized session exports.
 
