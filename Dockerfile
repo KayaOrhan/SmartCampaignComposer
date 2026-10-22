@@ -7,9 +7,13 @@ COPY internal ./internal
 COPY migrations ./migrations
 COPY seed ./seed
 RUN CGO_ENABLED=0 go build -trimpath -o /api ./cmd/api
+RUN CGO_ENABLED=0 go build -trimpath -o /worker ./cmd/worker
+RUN CGO_ENABLED=0 go build -trimpath -o /mockprovider ./cmd/mockprovider
 
 FROM scratch
 COPY --from=build /api /api
+COPY --from=build /worker /worker
+COPY --from=build /mockprovider /mockprovider
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 65532:65532
 EXPOSE 8080

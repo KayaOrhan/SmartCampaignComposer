@@ -28,7 +28,7 @@ report the conflict and request clarification.
 - `web/` frontend, `seed/` deterministic fake data, `ai-sessions/` exported sessions
 
 ## Commands
-- `docker compose up` or `make up` starts API and Postgres, applying migrations and fake seed data
+- `docker compose up` or `make up` starts API, Postgres, worker and mock provider, applying migrations and fake seed data
 - `make test` all tests, no external network or real API key; local Postgres and mock HTTP services are allowed
 - `make lint` linters and secret scan
 - `make check` lint + test; must be green before anything is called done

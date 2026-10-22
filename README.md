@@ -1,6 +1,6 @@
 # Smart Campaign Composer
 
-Slices 1, 2, 3A, 3B, 3C and 3D implement the Go/PostgreSQL foundation, fake seed data, validated audience previews, segment/message generation, revision-conditional template persistence and human editing. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
+The backend implements fake seed data, validated audience previews, segment/message generation, revision-conditional persistence/editing, atomic approval/enqueueing and a PostgreSQL worker with mock delivery. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
 
 ## Run
 
@@ -10,7 +10,7 @@ Install Docker with Compose and start its Linux container engine. From the repos
 docker compose up
 ```
 
-Compose builds a missing API image, waits for PostgreSQL health, and starts the API on `127.0.0.1:8080`. PostgreSQL is not exposed to the host. The `app` credentials are disposable local development defaults. Data persists in a named volume. After source changes, use `docker compose up --build` to rebuild an existing image.
+Compose builds missing images, waits for PostgreSQL health, and starts the API on `127.0.0.1:8080`, mock provider on `127.0.0.1:8081` and a separate worker. PostgreSQL is not exposed to the host. The `app` credentials are disposable local development defaults. Data persists in a named volume. After source changes, use `docker compose up --build` to rebuild existing images. The API owns migrations; worker/provider fail closed and restart if their schema is not ready during startup.
 
 ```sh
 curl -i http://localhost:8080/health
@@ -39,7 +39,7 @@ No dotenv loader is used. Compose passes explicitly configured `ANTHROPIC_API_KE
 | `POST /campaigns/{id}/approve` | JSON approval_fingerprint, required If-Match | 200 approval receipt and persisted queue counts |
 | `GET /campaigns/{id}/delivery-status` | No body | 200 PostgreSQL progress counts, no recipient details |
 
-Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segment and content changes are allowed in draft/content_ready only. Preview without a segment returns 409. Approval and PostgreSQL enqueueing are implemented; delivery execution is pending.
+Briefs must contain 1 to 4000 runes after trimming. Channels are a nonempty unique selection of `sms`/`email`, stored in canonical order. Segment and content changes are allowed in draft/content_ready only. Preview without a segment returns 409. Approval/enqueueing and mock delivery execution are implemented.
 
 Example segment:
 
@@ -132,7 +132,8 @@ Make is now available. Race testing remains blocked by missing CGO/compiler supp
 
 ## Known gaps
 
-- Mock delivery provider, worker, retry/recovery processing, metrics and Vue are not implemented yet. Approved jobs remain pending; sending currently means queued. The Claude adapter is tested against local protocol fixtures; live model access, latency and account-specific compatibility remain unverified. The mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs. Final Compose startup must also include the mock provider.
+- Metrics endpoints, dashboard push updates and Vue remain unimplemented. Delivery progress is available through PostgreSQL-backed GET delivery-status. The Claude adapter is tested against local protocol fixtures; live model access, latency and account-specific compatibility remain unverified. The mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs.
+- Channel dispatch is serialized across processes and deliberately waits until each HTTP response plus 10 ms; slow calls reduce throughput. PostgreSQL advisory locks require direct/session-preserving connections (no transaction-pooling proxy). Default lease recovery may take 30 seconds. Provider acceptance and worker acknowledgement are separate commits: an accepted but unacknowledged final attempt can be reported dead after a crash. The acceptance ledger prevents duplicate simulated effects; it is not proof of delivery by a real provider. No real delivery provider is supported.
 - Revisions protect campaign writes, not mutable profiles/consents; validation snapshots are historical. Full content history, authenticated editor identity and generated-content provenance are absent. A lost save response requires GET/reconciliation, not blind retry with a fresh revision.
 - SDK malformed SSE event-envelope JSON currently maps to unavailable rather than the tool-validation repair path. Transient retries use a fixed 100 ms delay; up to six provider attempts share one generation deadline. Real-model repair effectiveness and timing remain unverified.
 - PostgreSQL remains the queue choice (ADR-006).
@@ -271,7 +272,7 @@ Rules 1/3 and rendered-bound validation are exercised by existing TestDomain/Tes
 
 ## Campaign approval and PostgreSQL queue
 
-Generate -> validate preview -> explicitly save/edit -> revalidate -> content_ready -> review current audience preview -> approve and atomically enqueue -> sending. The intermediate approved state is not exposed by this increment. No worker runs yet, so every new delivery remains pending.
+Generate -> validate preview -> explicitly save/edit -> revalidate -> content_ready -> review current audience preview -> approve and atomically enqueue -> sending -> completed. The intermediate approved state is not exposed. The worker consumes pending deliveries as described below.
 
 POST `/campaigns/{id}/audience-preview` with no body after saving messages. Retain its ETag, revision and non-null approval_fingerprint together. The SHA-256 fingerprint covers versioned canonical templates, campaign revision, ordered recipient/channel membership, destinations and literal rendered payloads. It excludes as_of, so elapsed time alone does not force another review; event-window membership changes do. It is a comparison token, not authorization. A draft or empty audience has no approval fingerprint. A zero-count selected channel is allowed when the union is nonempty; all selected templates still undergo existing schema-bound validation.
 
@@ -295,9 +296,9 @@ An empty union returns 409 empty_audience. Changed membership, destination or re
 
 A successful approval returns the new ETag. After a lost response, GET campaign to reconcile its current revision. Repeating approval with that current token and the same original fingerprint returns the existing receipt/counts without creating jobs or advancing revision; the old token remains stale. Another fingerprint on an already approved campaign is rejected. Segment/template edits and generation cannot mutate approved content.
 
-GET `/campaigns/{id}/delivery-status` returns the response shape above for the current PostgreSQL snapshot, including all selected channels and zero-valued counters. Before approval the approval fields are null and counts zero. It exposes no user IDs, destinations or payloads. It deliberately has no ETag because future delivery progress can change without advancing campaign revision; GET campaign supplies the mutation token. No cancellation, worker control, enqueue-again or recipient-detail API is added.
+GET `/campaigns/{id}/delivery-status` returns the response shape above for the current PostgreSQL snapshot, including all selected channels and zero-valued counters. Before approval the approval fields are null and counts zero. It exposes no user IDs, destinations or payloads. It deliberately has no ETag because delivery progress changes without advancing campaign revision; GET campaign supplies the mutation token. No cancellation, worker control, enqueue-again or recipient-detail API is added.
 
-Consent/profile data is coherent at the approval transaction snapshot. Future dispatch must recheck consent immediately before each mock send and use frozen destinations/content. Worker claims, fencing, crash recovery, provider deduplication, rate limiting and retry execution remain the next independently reviewed work; queue uniqueness alone does not prove exactly-once delivery.
+Consent/profile data is coherent at the approval transaction snapshot. Dispatch rechecks consent immediately before each mock send and uses frozen destinations/content. The worker and durable mock ledger provide the retry/recovery behavior described below; queue uniqueness alone does not prove exactly-once delivery.
 
 ### Approval/queue verification (2026-10-22)
 
@@ -312,3 +313,64 @@ go test -mod=readonly ./...
 Tests cover current consent/bounds, same-count membership/profile/contact changes, frozen literal payloads, duplicate prevention, reconciled repeats, stale revisions, edit/approval and approval/approval races, rollback across insertion batches, cancellation, aggregate status privacy and the 5000-user seed under the existing two-second database deadline. Temporarily making substitution recursive caused TestLiteralMessageRendering to fail; the original source was restored before final checks. No real Anthropic or delivery calls, new dependencies, RULES.md edits or commits. Race-detector coverage remains unavailable with the existing missing CGO compiler; synchronized database concurrency tests ran.
 
 Rules 1/3 are exercised by existing validated segment compilation plus TestApprovalDetectsSameCountChanges and TestApprovalRejectsInvalidCurrentState. Rule 4 queue uniqueness/repeat protection is covered by TestApprovalQueueSnapshotAndRepeat and TestApprovalConcurrency; worker-side delivery deduplication is not yet implemented. Rule 5 is covered by aggregate-only HTTP/status assertions, private storage payloads and the repository scanner. Rule 6 retains mock/test mode and constructor guards. Rule 9 is backed by the deliberate rendering failure control. Review of the actual implementation diff: No findings.
+
+## PostgreSQL worker and mock delivery
+
+Run `docker compose up --build`. The API applies migrations and seeds fake users; the separate `cmd/worker` process consumes jobs and `cmd/mockprovider` accepts simulated HTTP messages. Existing pending campaigns are processed automatically. No LLM, segment compilation, recipient lookup or personalization occurs during delivery. The only mutable audience-related lookup is the final consent/campaign/claim check.
+
+Queue lifecycle preserves the API vocabulary:
+
+- pending -> in_flight: atomically claim one due row with FOR UPDATE SKIP LOCKED, increment attempts and claim_generation, set locked_at and lease_expires_at.
+- in_flight -> sent: provider accepted the frozen payload and returned its deterministic receipt.
+- in_flight -> pending: network/timeout, 429, 5xx or malformed success receipt; schedule capped exponential full-jitter backoff and respect Retry-After as a minimum.
+- in_flight -> dead: permanent rejection or the fifth failed/abandoned processing attempt.
+- in_flight -> skipped: final consent is absent/revoked or the campaign is no longer sending.
+
+Claims count processing attempts, including abandoned ones. The maximum is five, enforced by worker/repository policy and a database constraint. Backoff is a uniform delay from zero through min(60s, 1s * 2^attempts); a larger Retry-After is honored. Expired leases are recovered on worker polling and become immediately due, or dead at the limit. Graceful shutdown stops claiming, cancels waits/HTTP, waits for goroutines and leaves ambiguous work leased for recovery. No new administrative retry/cancellation API is introduced.
+
+A result transaction locks the campaign before its delivery row, compares the active generation and unexpired lease, writes the outcome, then sets completed only when no pending/in_flight rows remain. Recovery follows the same lock order. Claims skip locked delivery rows; results from a superseded worker cannot overwrite newer claims. Completion can contain dead/skipped rows and never increments campaign revision. GET delivery-status keeps its existing aggregate shape; counters now advance asynchronously.
+
+All processes share a PostgreSQL session advisory lock per channel. While waiting, a live worker renews its claimed lease. Admission waits for the durable next-start time, checks consent/ownership immediately before HTTP and extends the lease. Before sending it reserves admission through that lease; normal cleanup shortens the reservation to response completion plus 10 ms. This provides conservative cross-process pacing without burst credit, including retries; a hard crash leaves a durable cooldown. Calls are context-bounded by the provider timeout and lease deadline. No worker transaction spans HTTP. A session connection is held through dispatch; uncertain unlock/acquisition failures discard it rather than returning a locked session to the pool. Wall-clock lease deadlines assume the worker and PostgreSQL clocks are synchronized, as in local Compose.
+
+The mock validates limits and permits only mock-phone-* destinations and @example.test emails. POST /messages receives a frozen channel/destination/subject/body and Idempotency-Key. It returns {"message_id":"mock-<64 hex characters>"}, or safe 422/409/429/503 errors. Its PostgreSQL acceptance ledger stores only the deterministic key, payload hash, channel, receipt and timestamp. Matching accepted retries return the same receipt; conflicting content is rejected. Acceptance survives provider restart and ambiguous worker acknowledgement. The mock independently enforces a 100-per-second rolling admission limit, returns Retry-After: 1 on 429, and derives faults/delay from FAULT_SEED, key and persisted attempt number. There is no real messaging SDK or forwarding path.
+
+GET http://127.0.0.1:8081/debug/messages exposes only {"total":N,"by_channel":{"sms":N,"email":N}}. /health and /ready are available on the mock provider; the API retains its existing health endpoints. Neither debug output nor logs expose destinations/message content. Provider URL configuration accepts only HTTP on mockprovider or explicit loopback IPs with a valid port; redirects and ambient proxies are disabled.
+
+Configuration (names also in .env.example): WORKER_CONCURRENCY is 1..32 per channel, default 1; WORKER_LEASE defaults to 30s, WORKER_POLL to 100ms, PROVIDER_TIMEOUT to 3s. The lease must exceed provider timeout plus twice DB_TIMEOUT plus one second. The worker pool reserves extra connections for acknowledgements/recovery. More concurrency/replicas does not raise the shared per-channel dispatch limit. FAULT_RATE_5XX and FAULT_RATE_429 default in Compose to 0.05 and 0.02; their sum must not exceed one. FAULT_LATENCY_P95_MS is the retained configuration name for the deterministic delay upper bound (default 20 ms), not a measured percentile. No authentication or public exposure is added to the local mock.
+
+Local checks and controls (PowerShell, without reading private configuration):
+
+```powershell
+$env:COMPOSE_DISABLE_ENV_FILE='1'
+$env:APP_ENV='test'
+$env:LLM_PROVIDER='mock'
+$env:ANTHROPIC_API_KEY=$null
+$env:FAULT_RATE_5XX='0'
+$env:FAULT_RATE_429='0'
+$env:FAULT_LATENCY_P95_MS='0'
+docker compose --env-file .env.example up -d --build
+docker compose --env-file .env.example stop worker
+docker compose --env-file .env.example start worker
+```
+
+Stop the worker to inspect pending jobs; start it to observe progress. To exercise hard-stop recovery locally, use docker compose --env-file .env.example kill -s SIGKILL worker, then start worker; abandoned leases become recoverable after their deadline. The worker and mock provider may be restarted independently. Do not delete volumes to simulate recovery: the queue and acceptance ledger must survive.
+
+Run the maintained Postman collection with the local mock/test API and worker active. The final request polls delivery-status for up to 180 seconds, checks completion, conservation of job counts and unchanged revision. Request/assertion totals vary with polling. For deterministic end-to-end success, use the zero-fault overrides above; failure behavior is exercised separately in Go/PostgreSQL tests. A large existing backlog can need more than the polling allowance. Stop workers before running older historical queue-only workflows.
+
+### Worker/mock verification (2026-10-22)
+
+Executed make check successfully (repository safety/formatting, go vet and all unit tests), the full Docker disposable-PostgreSQL integration suite, mock/test Compose startup and the complete local Postman collection. Final Postman execution passed 203 requests and 548 assertions, zero failures, exit 0, in 2m 6.5s; totals include repeated progress polling and the mock health/ready/debug/invalid-ingress contracts. Two worker containers ran concurrently during this execution. Earlier execution also passed (217 requests, 593 assertions); counts differ with polling/backlog. Cloud reporting was disabled.
+
+Actual Go check output included:
+
+```text
+repository safety and formatting checks passed
+go vet -mod=readonly ./...
+go test -mod=readonly ./...
+```
+
+The PostgreSQL tests cover successful completion/revision preservation; transient success on retry, permanent rejection and exhaustion; atomic competing claims and two concurrent workers; acceptance-before-ack crash simulation, stale dispatch/result fencing and provider restart deduplication; claim/result/provider transaction rollback; consent revocation during admission and consent-query failure; independent provider rate rejection; 104 concurrent/repeated channel admissions with rolling-window checks; waiting-lease renewal and cancellation. Existing approval, migration, template, seed and LLM/audit regressions passed. No tests were skipped. Database-authoritative timing is checked with PostgreSQL timestamps and controlled SQL expiry/aging, rather than a fake process clock for the shared gate.
+
+A separate Compose SIGKILL smoke test observed an abandoned active lease, restarted worker and mock provider, then completed all 1597 jobs with unchanged campaign revision. A SQL aggregate comparison confirmed total mock acceptances equalled sent rows. Graceful stop/start was also exercised. No recipient payload or destination was printed. Unit tests assert cancellation does not acknowledge ambiguous work. Temporarily accepting permanent HTTP failures as successful responses made the 400/401/409/422 classification regressions fail; the source was restored and checked green.
+
+Safety coverage: Rules 1/3 retain the trusted compiler and current-approval regressions, with TestFinalConsentAfterGateWait and TestConsentAndProviderStorageFailClosed proving final dispatch boundaries. Rule 2 is covered by TestRetryPolicyAndMockClient allowlist checks and TestMockIngressAndLimits synthetic destination checks. Rule 4 is covered by TestConcurrentClaimsAndWorkers, TestDeliveryCrashFencingAndProviderRestart and the hard-stop aggregate check. Rules 5/7 use metadata-only logs, aggregate HTTP contracts and the repository scanner; no protected configuration was read. Rule 6 retains mock/test mode and the existing real-client construction guard. Rule 9 has the deliberate classification failure control. No new dependency, RULES.md edit, real Anthropic/SMS/email call or commit. Sandbox loopback/Docker denials were rerun with approved access, without skipping tests. Race-detector execution remains unavailable with the existing missing CGO compiler. Actual implementation diff review: No findings.

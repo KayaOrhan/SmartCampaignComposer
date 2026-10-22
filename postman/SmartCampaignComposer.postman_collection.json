@@ -2,7 +2,7 @@
   "info": {
     "name": "Smart Campaign Composer",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Local mock/test regression suite including atomic approval and PostgreSQL queue insertion. Synthetic data only; no worker, provider sends, or real LLM calls."
+    "description": "Local mock/test regression suite including approval, durable queue and PostgreSQL worker completion. Synthetic data only; no real LLM, SMS or email calls. Run against Compose with worker and mockprovider."
   },
   "variable": [
     {
@@ -12,6 +12,11 @@
     {
       "key": "campaignId",
       "value": ""
+    },
+    {
+      "key": "mockProviderUrl",
+      "value": "http://127.0.0.1:8081",
+      "type": "string"
     }
   ],
   "event": [
@@ -2952,7 +2957,8 @@
                 "exec": [
                   "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
                   "pm.test(\"JSON/no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});",
-                  "pm.test(\"Counts and approval survive retrieval\",()=>pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.variables.get(\"approvedStatus\"))));"
+                  "const d=pm.response.json(), a=JSON.parse(pm.variables.get(\"approvedStatus\"));",
+                  "pm.test(\"Durable queue and unchanged approval revision\",()=>{pm.expect(d.campaign_id).to.eql(a.campaign_id);pm.expect(d.revision).to.eql(a.revision);pm.expect(d.approved_at).to.eql(a.approved_at);pm.expect(d.approved_revision).to.eql(a.approved_revision);pm.expect(d.counts.total).to.eql(a.counts.total);pm.expect([\"sending\",\"completed\"]).to.include(d.status);for(const n of [d.counts,...Object.values(d.by_channel)])pm.expect(n.pending+n.in_flight+n.sent+n.dead+n.skipped).to.eql(n.total);});"
                 ]
               }
             }
@@ -3029,7 +3035,8 @@
                 "exec": [
                   "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
                   "pm.test(\"JSON/no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});",
-                  "pm.test(\"No new jobs or revision\",()=>pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.variables.get(\"approvedStatus\"))));"
+                  "const d=pm.response.json(), a=JSON.parse(pm.variables.get(\"approvedStatus\"));",
+                  "pm.test(\"Durable queue and unchanged approval revision\",()=>{pm.expect(d.campaign_id).to.eql(a.campaign_id);pm.expect(d.revision).to.eql(a.revision);pm.expect(d.approved_at).to.eql(a.approved_at);pm.expect(d.approved_revision).to.eql(a.approved_revision);pm.expect(d.counts.total).to.eql(a.counts.total);pm.expect([\"sending\",\"completed\"]).to.include(d.status);for(const n of [d.counts,...Object.values(d.by_channel)])pm.expect(n.pending+n.in_flight+n.sent+n.dead+n.skipped).to.eql(n.total);});"
                 ]
               }
             }
@@ -3157,7 +3164,7 @@
           ]
         },
         {
-          "name": "Jobs remain pending without a worker",
+          "name": "Await mock delivery completion",
           "request": {
             "method": "GET",
             "header": [],
@@ -3171,8 +3178,111 @@
                 "exec": [
                   "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
                   "pm.test(\"JSON/no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});",
-                  "pm.test(\"No simulated sends started\",()=>pm.expect(pm.response.json()).to.deep.eql(JSON.parse(pm.variables.get(\"approvedStatus\"))));"
+                  "const d=pm.response.json(), a=JSON.parse(pm.variables.get(\"approvedStatus\"));",
+                  "pm.test(\"Durable queue and unchanged approval revision\",()=>{pm.expect(d.campaign_id).to.eql(a.campaign_id);pm.expect(d.revision).to.eql(a.revision);pm.expect(d.approved_at).to.eql(a.approved_at);pm.expect(d.approved_revision).to.eql(a.approved_revision);pm.expect(d.counts.total).to.eql(a.counts.total);pm.expect([\"sending\",\"completed\"]).to.include(d.status);for(const n of [d.counts,...Object.values(d.by_channel)])pm.expect(n.pending+n.in_flight+n.sent+n.dead+n.skipped).to.eql(n.total);});",
+                  "const start=Number(pm.variables.get(\"deliveryPollStarted\")||Date.now());pm.variables.set(\"deliveryPollStarted\",start);",
+                  "if(d.status!==\"completed\" && Date.now()-start<180000){setTimeout(()=>pm.execution.setNextRequest(\"Await mock delivery completion\"),1000);}else{pm.test(\"Worker completes all jobs\",()=>{pm.expect(d.status).to.eql(\"completed\");pm.expect(d.counts.pending+d.counts.in_flight).to.eql(0);pm.expect(d.counts.sent).to.be.above(0);});}"
                 ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Mock provider contract",
+      "item": [
+        {
+          "name": "Mock provider health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mockProviderUrl}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+                  "pm.test(\"JSON/no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mock provider ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mockProviderUrl}}/ready"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+                  "pm.test(\"JSON/no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mock provider debug/messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mockProviderUrl}}/debug/messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+                  "pm.test(\"JSON/no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});",
+                  "pm.test(\"Aggregate mock acceptances only\",()=>{const d=pm.response.json();pm.expect(d).to.have.all.keys(\"total\",\"by_channel\");pm.expect(d.by_channel).to.have.all.keys(\"sms\",\"email\");pm.expect(d.total).to.eql(d.by_channel.sms+d.by_channel.email);});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mock provider messages",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{mockProviderUrl}}/messages",
+            "body": {
+              "raw": "{\"channel\":\"sms\",\"destination\":\"mock-phone-fixture\",\"subject\":null,\"body\":\"Synthetic contract check\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "mode": "raw"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('HTTP 422',()=>pm.response.to.have.status(422));",
+                  "pm.test(\"JSON/no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});"
+                ],
+                "type": "text/javascript"
               }
             }
           ]

@@ -66,7 +66,7 @@ Status: Proposed
 **Consequences.** Behaviour matches the brief, and the marketer sees the real cost. The segment estimate is approximate and documented as such.
 
 ## ADR-006: Queue in Postgres with `FOR UPDATE SKIP LOCKED`
-Status: Proposed
+Status: Accepted; implemented as one-row claims. See ADR-024 and README verification.
 
 **Context.** An asynchronous queue is required. The `deliveries` rows already need durable state and uniqueness.
 
@@ -77,7 +77,7 @@ Status: Proposed
 **Consequences.** Enqueue, status and idempotency live in one transaction boundary. One fewer service in compose. Throughput is lower than a dedicated broker but well above the requirement. If volume grew by orders of magnitude we would move the queue out.
 
 ## ADR-007: Exactly-once effect from at-least-once delivery
-Status: Proposed
+Status: Accepted for mock acceptance deduplication; outcome reconciliation limits are documented in ADR-024.
 
 **Context.** "The same person never gets the same message twice", while workers can crash and networks can time out after the provider already accepted a request.
 
@@ -99,7 +99,7 @@ Status: Superseded by ADR-013
 **Consequences.** With N replicas the effective limit is N times 100, which is documented. The scaling path is a shared limiter. The mock provider enforces the limit independently and returns 429, so the client limiter is proven by test, not trusted.
 
 ## ADR-009: Retry policy
-Status: Proposed
+Status: Accepted; attempts count processing claims and errors are safe codes. See ADR-024 and README verification.
 
 **Decision.** Retry on network errors, timeouts, 5xx and 429 (honouring `Retry-After`). Do not retry other 4xx; mark `dead`. Backoff is `min(60s, 1s * 2^attempts)` with full jitter. Maximum 5 attempts, then `dead` with the last error stored.
 
@@ -135,7 +135,7 @@ Status: Proposed
 <!-- Add new ADRs below. Use the next number. -->
 
 ## ADR-013: Strict rolling-window delivery admission and final consent check
-Status: Proposed
+Status: Superseded by ADR-024
 
 **Context.** A burst-capable token bucket does not guarantee at most 100 calls in every rolling second. Checking consent before a limiter wait can use stale consent.
 
@@ -150,7 +150,7 @@ Immediately after capacity is available, query consent and then start HTTP witho
 **Verification.** Fake-clock rolling-window tests cover startup, idle periods, retries, concurrent callers and delayed consent queries. Revoke consent during the limiter wait and assert zero provider calls. Fail the consent query and assert zero provider calls.
 
 ## ADR-014: Conservative rendering bounds at approval
-Status: Proposed
+Status: Accepted; implemented with reviewed approval snapshots (ADR-023) and final consent checks (ADR-024).
 
 **Context.** Both allowed variables can expand, and audience data can change after preview.
 
@@ -302,3 +302,19 @@ Unique campaign/user/channel and deterministic unique idempotency keys protect i
 **Alternatives.** Revision-only approval misses mutable audience changes. Count-only comparison misses same-count membership/contact/content changes. Separate approval/enqueue commits introduce partially approved campaigns and extra recovery semantics. Automatically accepting an old revision on repeats weakens the existing precondition contract. An additional approval-token table/content history is unnecessary for this scope.
 
 **Consequences.** Approval does snapshot/render/hash work twice (preview and approval), acceptable for the verified 5000-user case study. Profiles/consents may change after the transaction snapshot: future dispatch must recheck consent and retain frozen content. sending currently means pending queue work; there is no worker, provider call or completion transition. Migration 007 prepares attempt/due/lease/generation fields only. This implements approval/freeze portions of ADR-006/007/014, not their future worker, provider idempotency, recovery or final-consent guarantees. Existing revision/editing and mock-first policies remain. Exact runtime and error contracts are canonical in README; verification is recorded there.
+
+## ADR-024: Leased PostgreSQL worker with durable mock acceptance
+
+Status: Accepted (2026-10-22); verification evidence is recorded in README.
+
+**Context.** Approval now freezes pending jobs. The original delivery milestone requires concurrency, retry/recovery, no duplicate simulated effect, current consent and 100 calls per second per channel. The requested concurrent processes invalidate ADR-013's single-replica limiter assumption.
+
+**Decision.** Reuse existing statuses, frozen payloads and lease/generation fields. Claim one due job atomically with SKIP LOCKED. Count at most five processing claims, including abandoned work. Fence dispatch/result writes with generation and expiry. Renew claims waiting for admission. Lock campaign before delivery for result/recovery transactions; complete campaigns when every job is terminal, without changing revision. Use existing bounded database patterns and no transaction over HTTP.
+
+Use a shared session advisory channel gate with PostgreSQL next-start state, conservative response-plus-10ms pacing and a lease-length crash reservation. Keep final consent/campaign/ownership checks after admission. A provider timeout and absolute lease deadline bound the HTTP call. Discard uncertain advisory-lock sessions. This supports several worker processes; the direct/session-preserving PostgreSQL connection requirement and synchronized clock assumption are explicit. Configurable goroutines provide bounded concurrency, not extra per-channel rate allowance.
+
+The separate mock HTTP service derives deterministic faults from key/attempt/seed. A PostgreSQL ledger records unique accepted keys, payload hashes and safe receipts without recipients/content. Same-key matching retries deduplicate across restarts, conflicting content fails. Mock attempt counters and a rolling rate-window table are separate from worker queue state. Safe mock-only destination checks, strict ingress and allowlisted/no-proxy/no-redirect client transport preserve the real-delivery boundary.
+
+**Alternatives.** In-memory provider deduplication loses safety on restart. Per-process rate limiters multiply capacity. Holding database transactions across HTTP keeps locks open and couples provider latency to queue transactions. Lease renewal for every running HTTP call is unnecessary because configured provider timeout is strictly shorter than the lease; waiting claims do renew. A broker, generic job framework, full attempt-history table and frontend are unnecessary here.
+
+**Consequences.** Per-channel HTTP is deliberately serialized; latency reduces throughput. Durable mock state shares PostgreSQL for this case study and is not a real-provider integration. At-least-once attempts plus provider deduplication prevent duplicate acceptance, but accepted final attempts can remain unacknowledged and become dead after crash exhaustion. No promise of universally exact delivery status is made. Consent changes after its final check still race with external dispatch as previously documented. Recovery uses database time; pacing/HTTP deadline tests target the synchronized local runtime. This supersedes ADR-013's single-replica admission implementation and completes the implemented queue/retry/mock-provider portions of ADR-006/007/009/014; metrics and dashboard push remain separate work.

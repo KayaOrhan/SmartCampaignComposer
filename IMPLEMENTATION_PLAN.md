@@ -60,7 +60,11 @@ Approved scope: implement the approval and PostgreSQL queue portions of the exis
 ## Later slices
 
 1. Live Claude smoke verification only when explicitly authorized; independent of backend delivery work.
-3. Complete the PostgreSQL deliveries milestone (ADR-006): worker, retries/recovery, send idempotency, consent recheck, rate limiting and fault-injecting mock provider. Approval and pending queue persistence are implemented above.
+3. PostgreSQL deliveries milestone: implemented worker and mock provider as described below; verification evidence is in README.
 4. Vue interface, dashboard and metrics; final verification and sanitized session exports.
 
 Each slice needs its own approved file plan. Final plain `docker compose up` must include seed and mock provider; tests require no real API key. Bonus scope remains deferred. No commits without explicit approval.
+
+## PostgreSQL queue worker and mock delivery
+
+Approved continuation of the original deliveries milestone, not a new numbered slice. Implemented incrementally: queue claim/fenced acknowledgement/recovery transactions; durable deterministic mock HTTP provider; context-bounded worker/client with final consent check and shared channel admission; Compose wiring; unit/PostgreSQL/Postman verification. Migration 008 adds the mock acceptance/attempt/rate-window tables, channel admission state, expired-lease index and five-attempt constraint. API status names and campaign revisions remain unchanged. See ADR-024 and README for transaction boundaries, failure semantics and verification. Vue, metrics/push dashboard updates, real model smoke checks and session exports remain later work.

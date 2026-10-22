@@ -58,7 +58,7 @@ Manual Postman walkthrough:
 6. Try an unknown variable, overlong rendered field, missing channel or duplicate JSON key; GET confirms that text, revision and readiness are unchanged. Repeat an earlier save with staleETag to observe 412.
 7. Change or regenerate the segment using the current token. GET messages returns retained human text, draft status and validation=null. PUT that retained/edited set with the current token to revalidate and restore content_ready.
 
-The SSE CLI assertions remain buffered; Go socket tests establish incremental flushing/cancellation. Go PostgreSQL tests, rather than sequential collection requests, establish competing-writer behavior, current mutable audience bounds, cancellation and transactional rollback. Runtime contracts and response examples are canonical in README's Saved messages and editing section. Approval/queue requests follow in their own folder; no delivery provider is called.
+The SSE CLI assertions remain buffered; Go socket tests establish incremental flushing/cancellation. Go PostgreSQL tests, rather than sequential collection requests, establish competing-writer behavior, current mutable audience bounds, cancellation and transactional rollback. Runtime contracts and response examples are canonical in README's Saved messages and editing section. Approval/queue requests follow in their own folder; delivery uses only the local mock provider.
 
 3D verification on 2026-10-22: final local mock/test execution passed 74 requests and 176 assertions, zero failures, exit 0. Cloud reporting was disabled; no real Anthropic or delivery service was called.
 
@@ -71,6 +71,14 @@ After the save/edit/revalidation folder, run Campaign approval and queue in orde
 3. POST /campaigns/{{campaignId}}/approve with Content-Type application/json, If-Match set to the reviewed ETag and JSON {"approval_fingerprint":"<captured fingerprint>"}. HTTP 200 returns sending, a new revision/ETag, approval source revision and all-pending counts.
 4. GET /campaigns/{{campaignId}}/delivery-status to read persisted aggregate results. This endpoint has no ETag; the collection preserves the previous mutation token when an endpoint lacks one.
 5. A stale approval token returns 412. Reconcile with GET campaign after an uncertain response; the same fingerprint and current revision returns the existing receipt without duplicate rows. A changed current audience returns 409 approval_preview_changed with a safe preview requiring review. An empty union or invalid readiness is rejected without partial enqueueing.
-6. Try editing approved templates/segment or regenerating; all are rejected. Final delivery-status remains pending because no worker/provider is implemented in this increment.
+6. Try editing approved templates/segment or regenerating; all are rejected. With the worker active, the final request polls until completed and checks terminal counts without changing the approval revision.
 
 Verification on 2026-10-22: the documented local mock/test command passed 97 requests and 232 assertions, zero failures, exit 0. Cloud run reporting was disabled. PostgreSQL tests separately cover simultaneous writers, same-count audience changes and transaction rollback; sequential Postman requests do not establish those properties. No real Anthropic, SMS or email request was made.
+
+## Active worker verification
+
+Run the current collection against the complete local Compose stack (API, worker, mockprovider and db), with mock/test LLM mode. The approval response still describes its atomic initial pending snapshot; later GET/repeated-approval responses can show in_flight/sent/dead/skipped and completed. Assertions preserve the approval revision, source revision, timestamp and total while allowing asynchronous progress. The final Await mock delivery completion request repeats once per second for at most 180 seconds and requires terminal counts and at least one mock success. A large pre-existing backlog may exceed that bound.
+
+For a deterministic happy-path run, set FAULT_RATE_5XX=0, FAULT_RATE_429=0 and FAULT_LATENCY_P95_MS=0 in the process environment before rebuilding/recreating Compose services. Keep real Anthropic disabled. Fault classifications, five-attempt exhaustion, lease abandonment/recovery, stale fencing and provider restart deduplication are covered separately by Go/PostgreSQL tests; sequential Postman polling does not prove these concurrency properties. The root README has exact startup/control commands and mock endpoint contracts. No request triggers real delivery.
+
+Worker verification on 2026-10-22: final local execution passed 203 requests and 548 assertions, zero failures, exit 0, with two worker containers and mock provider. Polling counts vary; Go/PostgreSQL tests and a separate SIGKILL recovery smoke test provide concurrency/recovery evidence.
