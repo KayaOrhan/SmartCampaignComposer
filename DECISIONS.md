@@ -338,3 +338,15 @@ Metrics use current-state deliveries and queue_depth gauges, audited llm_calls_t
 **Alternatives.** EventSource cannot POST. WebSockets or dashboard SSE add machinery with no assignment requirement. Browser-only campaign history loses existing campaigns. A frontend state framework or general query cache adds indirection to one list/detail flow. In-memory metrics would lose history on restart and disagree with durable queue state.
 
 **Consequences.** Local demonstration only; no authentication, persistent drafts or deep links. Safe conflict handling trades automatic merging for explicit reconciliation. Displayed aggregate metrics are operational snapshots, not real-delivery guarantees. Tests and verification evidence are recorded in README.
+
+## ADR-026: PostgreSQL 18.6 development baseline
+
+Status: Accepted (2026-10-25); verification evidence is recorded in README.
+
+**Context.** The developer requested PostgreSQL 18.6 with a fresh development database and no historical data upgrade support.
+
+**Decision.** Pin the official postgres:18.6-alpine image by verified multi-platform digest. Mount a fresh postgres18_data volume at /var/lib/postgresql, matching the image's version-specific PGDATA default. Retain existing application migrations, seed and pgx dependency.
+
+**Alternatives.** Retain PostgreSQL 17, or migrate its existing data; neither matches the approved development scope.
+
+**Consequences.** Development starts with fresh data. Existing volumes remain untouched and are not reused. No data conversion tooling or application schema change is needed. Verify fresh startup, migrations, persistence, database integration and mock-only API behavior before accepting this decision.

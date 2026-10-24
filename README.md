@@ -2,6 +2,23 @@
 
 Vue 3 + TypeScript campaign management, validated AI audience/message suggestions, explicit human editing and approval, and a PostgreSQL queue with mock delivery. The dashboard shows delivery progress and aggregate metrics. Requirements: [docs/CASE_STUDY.md](docs/CASE_STUDY.md). Architecture: [DECISIONS.md](DECISIONS.md). Safety: [RULES.md](RULES.md).
 
+## Technology stack and pinned versions
+
+Versions below describe repository pins, not versions detected on the host. Container digests are recorded in the linked build/configuration files.
+
+| Component | Version / repository source |
+| --- | --- |
+| Go API, worker and mock provider (`net/http`, `database/sql`) | Module language version `1.27.0` in [go.mod](go.mod); builder `golang:1.27.3-alpine`, digest-pinned in [Dockerfile](Dockerfile); runtime `scratch` |
+| PostgreSQL relational store and queue | `postgres:18.6-alpine@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5` in [docker-compose.yml](docker-compose.yml) |
+| Go direct dependencies | `pgx/v5 v5.11.0`, `anthropic-sdk-go v1.82.0`, `golang.org/x/text v0.29.0` in [go.mod](go.mod); transitive checksums in [go.sum](go.sum) |
+| Frontend | Vue `3.5.44`, TypeScript `5.9.3`, Vite `8.3.5`, Vue Vite plugin `6.0.10`, vue-tsc `3.3.13` in [web/package.json](web/package.json) |
+| Frontend tests | Vitest `5.0.5`, Vue Test Utils `2.5.1`, happy-dom `21.0.4`, Playwright `1.64.1`; exact dependency graph in [web/package-lock.json](web/package-lock.json) |
+| Frontend build / HTTP server | `node:22-alpine` and `nginx:stable-alpine`, both digest-pinned in [web/Dockerfile](web/Dockerfile). Tags do not specify exact patch versions; the digests fix image identity. |
+| Orchestration | Docker Compose; no Docker engine or Compose CLI version is pinned in the repository |
+| LLM | Mock fixtures by default; optional Claude via the pinned official Go SDK. Compose's model default is `claude-sonnet-4-6`, a model identifier rather than a verified live-service version. |
+
+PostgreSQL serves data and queue with fewer services (ADR-001/006); official container images are pinned by digest (ADR-015). ADR-026 records the PostgreSQL 18.6 development upgrade and fresh-volume policy.
+
 ## Run
 
 Install Docker with Compose and start its Linux container engine. From the repository root:
@@ -10,7 +27,7 @@ Install Docker with Compose and start its Linux container engine. From the repos
 docker compose up
 ```
 
-Compose builds missing images, waits for PostgreSQL health, and starts the frontend on `127.0.0.1:5173`, API on `127.0.0.1:8080`, mock provider on `127.0.0.1:8081` and a separate worker. PostgreSQL is not exposed to the host. The `app` credentials are disposable local development defaults. Data persists in a named volume. After source changes, use `docker compose up --build` to rebuild existing images. The API owns migrations; worker/provider fail closed and restart if their schema is not ready during startup.
+Compose builds missing images, waits for PostgreSQL health, and starts the frontend on `127.0.0.1:5173`, API on `127.0.0.1:8080`, mock provider on `127.0.0.1:8081` and a separate worker. PostgreSQL is published on `127.0.0.1:5433`, mapped to container port `5432`; backend containers connect to `db:5432`. The `app` credentials are disposable local development defaults. Data persists in a named volume. After source changes, use `docker compose up --build` to rebuild existing images. The API owns migrations; worker/provider fail closed and restart if their schema is not ready during startup.
 
 ```sh
 curl -i http://localhost:8080/health
@@ -26,9 +43,66 @@ No dotenv loader is used. Compose passes explicitly configured `ANTHROPIC_API_KE
 
 No environment file or API key is needed for a fresh mock demonstration. To avoid automatic loading of a local dotenv file, use `docker compose --env-file .env.example up --build`. Keep `LLM_PROVIDER=mock`; inherited shell variables override the template. Automated review explicitly selected `APP_ENV=test` and cleared the API key. For real Claude configuration, the operator supplies their own `ANTHROPIC_API_KEY` through Compose environment interpolation (a local ignored dotenv file or exported variable), selects `LLM_PROVIDER=anthropic` and uses a non-test `APP_ENV`. Automated tests never exercise that mode.
 
+The template lists process configuration; it does not make every variable a Compose override. Compose fixes `DATABASE_URL`, addresses, `DB_TIMEOUT`, `SEED_DATA=true`, mock scenarios/chunk delay, worker timing and `FAULT_SEED` in its service definitions. Only `${...}` entries there use shell/template interpolation (LLM mode/model/key/timeout, `APP_ENV`, worker concurrency and fault rates/latency). For a Go process launched on the host, use `127.0.0.1:5433` in `DATABASE_URL`; the template's `db:5432` hostname is internal to Compose. Host-run worker calls use the allowlisted loopback mock endpoint on port 8081.
+
 ## Architecture and demo
 
 The Vue SPA calls the Go API through a same-origin nginx `/api` proxy. The API validates Claude tool output, compiles the segment DSL with bound SQL parameters, and stores campaigns in PostgreSQL. Human saves and approval use revision tokens; approval freezes personalized payloads and enqueues them atomically. A separate Go worker consumes the PostgreSQL queue, rechecks consent, and calls only the mock provider. Shared database admission limits each channel; the durable mock ledger deduplicates retries. The dashboard polls persisted progress; metrics expose fixed-label aggregates.
+
+### PostgreSQL topology and choice
+
+The default Compose application has **one PostgreSQL instance** (`db`), **one application database** (`app`), and **one application schema** (`app`). API, worker and mockprovider all use the same database URL and `app` database role; they have separate connection pools, not separate databases. The named `postgres18_data` volume mounts `/var/lib/postgresql` and persists PostgreSQL 18's `/var/lib/postgresql/18/docker` data directory. This development upgrade starts fresh and applies all existing application migrations and seed data; older volumes are not reused.
+
+| Stored state | Location in database `app` |
+| --- | --- |
+| Profiles, consents, shopping events, campaigns and templates | `app.users`, `app.consents`, `app.cart_events`, `app.orders`, `app.campaigns`, `app.campaign_messages` |
+| Transactional delivery queue and channel admission | `app.deliveries`, `app.delivery_channels` |
+| Mock provider acceptance deduplication, attempts and rate window | `app.mock_acceptances`, `app.mock_attempts`, `app.mock_calls` |
+| LLM audit / seed marker | `app.llm_calls`, `app.seed_runs` |
+| Migration ledger (schema exception) | `public.schema_migrations` |
+
+[Migrations 001-008](migrations) define the application schema; [the migration runner](internal/store/migrate.go) creates the ledger separately in `public`. The optional test profile targets a **different database**, `scc_test`, on the same `db` instance. It is disposable test storage, not a separate production queue database.
+
+PostgreSQL fits the relational model: foreign keys connect campaigns, users, consents and deliveries; constraints enforce valid states and unique campaign/user/channel jobs; JSONB stores validated segment documents alongside relational records. Reusing it as the queue lets approval, frozen payload insertion and campaign state commit or roll back together. There is no database-to-broker dual write in this implementation. ADR-001/006 describe the choice, and ADR-023/024 describe the implemented transaction and worker semantics.
+
+The trade-off is shared capacity and failure: queue polling, updates, indexes, cleanup and admission locks compete with API queries; a database outage affects campaigns, workers and mock acceptance together. Queue scheduling, leases, recovery and retry policy are application code. The requirement is a maximum of 100 messages/second/channel, not a promised achieved throughput; response-plus-10ms serialization can be slower. No broker comparison benchmark establishes a universal performance advantage.
+
+| Alternative | When it may be preferable | Cost relative to this demo |
+| --- | --- | --- |
+| RabbitMQ | A dedicated message broker with routing and consumer acknowledgement requirements, or independently operated queue capacity | Another service and operational lifecycle; atomic campaign approval plus publication would need a reliable handoff such as an outbox and relay, with consumer idempotency still required |
+| Kafka | A retained event log with replay and multiple independent consumers, or a broader event-streaming architecture | Another distributed system and a different consumption model; campaign-to-log publication, delivery deduplication and delayed retries would still need design |
+
+These are scope trade-offs, not claims that PostgreSQL is universally superior. RabbitMQ is listed among ADR-006's alternatives; Kafka is a comparison here, not a recorded historical evaluation or rejected implementation.
+
+### API to queue to mock delivery
+
+```text
+Browser -> nginx /api -> Go API
+                           |
+                           v
+              PostgreSQL app database
+              app.campaigns + app.deliveries (atomic approval/enqueue)
+                           |
+                           v
+                     Go worker -> HTTP mockprovider /messages
+                           |                  |
+                           v                  v
+              app.deliveries status    app.mock_acceptances
+                           |
+              API aggregate reads -> browser polling / metrics
+```
+
+Approval validates the revision, reviewed audience fingerprint, saved content and consent-aware audience, then freezes personalized jobs in one transaction. The worker claims due rows with `FOR UPDATE SKIP LOCKED`, applies shared per-channel admission, rechecks consent and sends the frozen payload with a deterministic idempotency key. The mock records matching-key acceptance durably in the same database. The worker then records success, retry, dead or skipped status in a separate transaction; no database transaction spans HTTP. Leases recover abandoned work. At-least-once attempts and mock deduplication prevent duplicate simulated acceptance; acceptance and acknowledgement remain separate commits. The detailed failure semantics are in [PostgreSQL worker and mock delivery](#postgresql-worker-and-mock-delivery).
+
+### Authentication, authorization and exposure
+
+There is **no application authentication or authorization**: no login, session/token verification, roles, tenant isolation or campaign ownership checks. Anyone who can reach the API directly on port 8080 or through the web `/api` proxy can read campaigns/templates, create and edit campaigns, request generation, and approve mock delivery subject to the same validation/state rules. Health, metrics and mock debug/ingress endpoints are also unauthenticated. The worker has no published HTTP port.
+
+`If-Match` revisions prevent stale writes; audience fingerprints detect changed review inputs; consent checks protect recipient eligibility. None identifies or authorizes a caller. The human-review checkbox is a UI safeguard, not server-enforced reviewer identity. `APP_ENV=production` does not add access control. All backend services share the powerful database role used for initialization/migrations; there is no per-service least-privilege role separation.
+
+Current host bindings are loopback only, and Compose configures database traffic with `sslmode=disable`; HTTP has no configured TLS termination. Loopback limits network reach, not access by local processes. Publishing ports on public interfaces or forwarding the web UI through a tunnel exposes campaign content, unauthenticated mutations/approval, metrics and resource consumption. In optional Anthropic mode, unauthenticated generation can also spend the operator's API budget. Exposing PostgreSQL with the demo credentials risks direct data modification and bypasses application validation; exposing mock ingress permits fabricated simulated acceptances. Mock-only destination/transport restrictions prevent real SMS/email, but do not provide access control. Public deployment requires authenticated access and server-side authorization, restricted database/provider access, proper credentials and TLS; this repository does not implement those boundaries.
+
+### Demo walkthrough
 
 1. Open [Campaign Studio](http://127.0.0.1:5173), select SMS and email, and create a brief such as: "A short, friendly 30% offer for Istanbul users who added to cart but did not purchase in the last 30 days."
 2. Generate the segment and preview audience counts. Mock mode returns the documented sample segment regardless of brief wording.
@@ -447,3 +521,21 @@ Safety coverage: Rules 1/3/4 retain the compiler, consent, revision, approval an
 Environment failures were handled separately: sandbox loopback tests passed after approved local-network access; an unsupported Postman folder flag was corrected to the documented item selector. On session continuation Docker's engine was unavailable, causing connection-refused browser/Postman runs before any application assertion. After Docker recovered and /api/ready returned ready, both suites passed. No database volume was reset and no application behavior was changed to hide these failures.
 
 This historical milestone deferred exports, ADR reconciliation and final review; those are now recorded in [docs/SUBMISSION_REVIEW.md](docs/SUBMISSION_REVIEW.md). Live Claude verification remains unperformed and requires explicit authorization; the fixture-backed adapter and mock journey are verified. Local race detection still lacks the existing CGO/compiler requirement. No commit was created.
+
+## PostgreSQL 18.6 verification (2026-10-25)
+
+Verified the official image index digest with docker buildx imagetools inspect. Runtime SQL reported server_version 18.6, data_directory /var/lib/postgresql/18/docker, 8 applied migrations and 5000 seeded users on fresh storage. No application migration or driver change was required.
+
+Executed make check (exit 0), including repository safety/formatting, go vet, frontend type checking, Go unit/HTTP tests and frontend tests. Selected actual output:
+
+```text
+repository safety and formatting checks passed
+Test Files  5 passed (5)
+     Tests  17 passed (17)
+```
+
+The full Docker PostgreSQL integration suite passed against disposable scc_test: internal/store 21.172s, exit 0. It exercises existing migration, consent, approval, concurrency, retry, admission and deduplication regressions on PostgreSQL 18.6. The maintained local Postman collection passed 228 requests and 615 assertions, zero failures, exit 0; all 6267 mock deliveries completed. Reporting stayed local.
+
+A forced database container recreation preserved aggregate counts: 5000 users, 8 migrations, 2 campaigns, 6267 deliveries and 6267 mock acceptances; API /ready returned ready afterward. These are observed test-run counts, not fixed application requirements.
+
+The first integration/Postman attempt was interrupted by Docker Desktop stopping; both were rerun after restarting it. A sandboxed make check rerun blocked local HTTP fixtures; the approved local-access rerun passed. No tests were removed or skipped. Safety rules 1/3/4 remain covered by the existing segment/consent/queue integration tests; rules 2/6 by mock-only services and test configuration; rules 5/7 by the repository safety scanner and explicit template-only Compose invocation. No real Claude call or real delivery occurred. Browser E2E tests were not rerun for this infrastructure change.

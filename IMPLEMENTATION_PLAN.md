@@ -74,3 +74,7 @@ Changed scope: web source/tests/tooling and Docker proxy; additive campaign list
 ## PostgreSQL queue worker and mock delivery
 
 Approved continuation of the original deliveries milestone, not a new numbered slice. Implemented incrementally: queue claim/fenced acknowledgement/recovery transactions; durable deterministic mock HTTP provider; context-bounded worker/client with final consent check and shared channel admission; Compose wiring; unit/PostgreSQL/Postman verification. Migration 008 adds the mock acceptance/attempt/rate-window tables, channel admission state, expired-lease index and five-attempt constraint. API status names and campaign revisions remain unchanged. See ADR-024 and README for transaction boundaries, failure semantics and verification. The later Vue milestone implemented the dashboard and metrics through polling (ADR-025); final export/review status is recorded above.
+
+## PostgreSQL 18.6 development upgrade
+
+Approved on 2026-10-25: update the official digest-pinned Alpine image and PostgreSQL 18 volume layout, using fresh development storage. Retain application migrations and pgx; no historical data conversion. Update README and ADR-026, then verify make check, PostgreSQL integration, startup/restart persistence and local mock-only Postman behavior. Completed: checks, PostgreSQL integration, local mock-only Postman and container recreation persistence passed; see README for evidence.

@@ -107,3 +107,9 @@ One entry per exported session. Written at the end of the session, while it is f
 - Kept: Frozen payloads, consent/fencing boundaries, PostgreSQL queue/admission/deduplication, existing statuses/revisions, mock-only transport and no commits.
 - Where the agent was wrong: Initial local HTTP checks were sandbox-blocked; review also caught lock-order, uncertain advisory-lock cleanup and waiting-lease expiry risks before completion.
 - How I caught it: Approved local reruns, database failure/concurrency/rolling-window/renewal tests, deliberate classification failure control, SIGKILL recovery with aggregate deduplication check and final 203-request/548-assertion Postman run. Source transcript is in the export inventory.
+
+## 2026-10-25 PostgreSQL 18.6 development upgrade
+- Delegated: No subagents; used the Ponytail, verification and official Postman testing workflows.
+- Kept: Existing application migrations, pgx, mock-only services and user edits; selected fresh PostgreSQL 18 storage without historical conversion or commits.
+- Where the agent was wrong: The first verification attempt was interrupted when Docker Desktop stopped; no passing result was claimed for that run.
+- How I caught it: Runtime version/path, migration and seed counts plus make check and rerun PostgreSQL integration verified the baseline; final API and persistence results are recorded in README.
