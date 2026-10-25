@@ -17,7 +17,7 @@ func (s Campaigns) GetMessages(ctx context.Context, id int64) (result campaign.S
 		return result, databaseError(err)
 	}
 	defer finishTx(tx, &resultErr)
-	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1`, id))
+	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL`, id))
 	if err != nil {
 		return result, err
 	}
@@ -36,7 +36,7 @@ func messagesInTx(ctx context.Context, tx *sql.Tx, c campaign.Campaign) (result 
 	result = campaign.SavedMessages{CampaignID: id, Revision: c.Revision, Status: c.Status}
 	var revision sql.NullInt64
 	var preview []byte
-	if err := tx.QueryRowContext(ctx, `SELECT messages_validated_revision,message_validation_preview FROM app.campaigns WHERE id=$1`, id).Scan(&revision, &preview); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT messages_validated_revision,message_validation_preview FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&revision, &preview); err != nil {
 		return result, databaseError(err)
 	}
 	if revision.Valid {
@@ -106,7 +106,7 @@ func (s Campaigns) PutMessages(ctx context.Context, id, expected int64, body []b
 		return result, databaseError(err)
 	}
 	defer finishTx(tx, &resultErr)
-	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 FOR UPDATE`, id))
+	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id))
 	if err != nil {
 		return result, err
 	}

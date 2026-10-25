@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
+  build: { rollupOptions: { input: { app: 'index.html', docs: 'docs/index.html' } } },
   plugins: [vue()],
   // Never load local dotenv files. Runtime secrets belong to the API process.
   envDir: false,

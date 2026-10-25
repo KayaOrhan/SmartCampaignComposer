@@ -25,7 +25,7 @@ func (s Campaigns) GenerationInput(ctx context.Context, id int64, asOf time.Time
 		return c, result, ErrUnavailable
 	}
 	defer finishTx(tx, &resultErr)
-	c, err = readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1`, id))
+	c, err = readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL`, id))
 	if err != nil {
 		return c, result, err
 	}

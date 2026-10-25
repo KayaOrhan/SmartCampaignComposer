@@ -113,3 +113,15 @@ One entry per exported session. Written at the end of the session, while it is f
 - Kept: Existing application migrations, pgx, mock-only services and user edits; selected fresh PostgreSQL 18 storage without historical conversion or commits.
 - Where the agent was wrong: The first verification attempt was interrupted when Docker Desktop stopped; no passing result was claimed for that run.
 - How I caught it: Runtime version/path, migration and seed counts plus make check and rerun PostgreSQL integration verified the baseline; final API and persistence results are recorded in README.
+
+## 2026-10-25 Focused campaign UX and safe draft deletion
+- Delegated: No subagents; used campaign-domain, delivery-pipeline, Ponytail, verification and official Postman workflows for the approved plan.
+- Kept: Explicit human confirmation, fresh revision/fingerprint review, restrictive foreign keys, retained audits/content, no delivery-history deletion, mock-only verification and no commits.
+- Where the agent was wrong: The initial deletion file had an unused import, and the old collection still expected DELETE to be unsupported. Fixed the import and changed that assertion to PATCH; no failing check was bypassed.
+- How I caught it: Go vet, PostgreSQL lifecycle/retention/concurrency tests, 21 frontend tests, six browser regressions and the final 234-request/596-assertion local Postman run. A temporary confirmation-guard mutation failed two tests; restored sources passed final checks. Canonical evidence and limitations are in README.
+
+## 2026-10-25 Bilingual interface and OpenAPI documentation
+- Delegated: No subagents; used campaign/delivery/LLM contracts, Ponytail, verification and official Postman documentation/testing workflows under the approved plan.
+- Kept: Existing authored data, API machine contracts, explicit human review and deletion safeguards; English default, no i18n dependency, local-only Swagger assets, mock-only tests and no commits.
+- Where the agent was wrong: The first automated text replacement retained v-pre around translated placeholder help; inspection caught and corrected it before browser verification. Review also guarded error-code lookup against object prototype names.
+- How I caught it: 25 frontend tests, Go route/DTO/reference/Postman consistency, official OpenAPI/schema validation, PostgreSQL integration, nine browser regressions and 234-request/597-assertion local Postman execution. Translation and approval-documentation mutations failed the expected tests; restored final sources passed checks. Evidence and limitations are in README.

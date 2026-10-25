@@ -15,7 +15,7 @@ func (s Campaigns) List(ctx context.Context, before int64, limit int) (campaign.
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
-	rows, err := s.DB.QueryContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE ($1::bigint=0 OR id<$1) ORDER BY id DESC LIMIT $2`, before, limit+1)
+	rows, err := s.DB.QueryContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE deleted_at IS NULL AND ($1::bigint=0 OR id<$1) ORDER BY id DESC LIMIT $2`, before, limit+1)
 	if err != nil {
 		return page, ErrUnavailable
 	}

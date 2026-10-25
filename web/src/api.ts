@@ -1,3 +1,4 @@
+import { t, errorKeys } from './i18n'
 import type { Campaign, CampaignPage, Delivery, Messages, Preview, SavedMessages } from './types'
 
 export class ApiError extends Error {
@@ -28,14 +29,22 @@ export const api = {
   preview: (id: number, signal?: AbortSignal) => request<Preview>(`/campaigns/${id}/audience-preview`, { method: 'POST', signal }),
   save: (id: number, revision: number, messages: Messages, signal?: AbortSignal) => request<SavedMessages>(`/campaigns/${id}/messages`, { ...json({ messages }, etag(id, revision)), method: 'PUT', signal }),
   approve: (id: number, preview: Preview, signal?: AbortSignal) => request<Delivery>(`/campaigns/${id}/approve`, { ...json({ approval_fingerprint: preview.approval_fingerprint }, etag(id, preview.revision)), signal }),
+  remove: async (c: Campaign, signal?: AbortSignal): Promise<void> => {
+    await checked(await fetch(`/api/campaigns/${c.id}`, { method: 'DELETE', headers: { 'If-Match': etag(c.id, c.revision) }, cache: 'no-store', signal: signal ?? AbortSignal.timeout(15000) }))
+  },
   delivery: (id: number, signal?: AbortSignal) => request<Delivery>(`/campaigns/${id}/delivery-status`, { signal }),
 }
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 409 || error.status === 412) return 'The campaign or audience changed. Refresh, reconcile your changes, and review again before saving or approving.'
-    if (error.status === 503) return 'The service is temporarily unavailable. Please retry.'
-    return `${error.code.replaceAll('_', ' ')} (${error.path}).`
+    if (error.status === 409 || error.status === 412) return t('The campaign or audience changed. Refresh, reconcile your changes, and review again before saving or approving.')
+    if (error.status === 503) return t('The service is temporarily unavailable. Please retry.')
+    if (error.code === 'llm_timeout') return t('The AI request timed out. Please retry.')
+    if (error.code === 'llm_output_invalid') return t('The AI response did not pass validation. Please retry.')
+    if (error.code === 'llm_refused') return t('The AI declined this request. Edit the brief and retry.')
+    if (['llm_unavailable', 'llm_audit_unavailable', 'generation_failed'].includes(error.code)) return t('AI generation failed. Please retry.')
+    const key = Object.hasOwn(errorKeys, error.code) ? errorKeys[error.code] : undefined
+    return key ? t('Request failed: {message} ({path}).', { message: t(key), path: error.path }) : t('The request could not be completed. Refresh and retry.')
   }
-  if (error instanceof Error && error.name === 'AbortError') return 'Operation cancelled. Refresh to check whether a save completed.'
-  return 'Unable to reach the service. Check the connection and retry.'
+  if (error instanceof Error && error.name === 'AbortError') return t('Operation cancelled. Refresh to check whether a save completed.')
+  return t('Unable to reach the service. Check the connection and retry.')
 }

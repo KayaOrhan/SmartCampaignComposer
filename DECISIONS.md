@@ -327,7 +327,7 @@ Status: Accepted (2026-10-22); frontend, browser, Go/PostgreSQL and Postman evid
 
 **Decision.** Build a Vue 3/strict TypeScript/Vite SPA with native fetch, small task-focused components and one campaign composable. No router, store library or UI framework is needed for list/detail navigation. A same-origin /api proxy in Vite and nginx preserves POST SSE, disables buffering and keeps credentials out of browser code. Vite dotenv loading is disabled. Render all generated/user text through Vue interpolation or form values, never HTML.
 
-Use a bounded fetch SSE reader, cancel on navigation, reset provisional content on each provider attempt, and reject incomplete/malformed streams. A validated suggestion still requires an explicit full-set save using its base_revision. Save/segment edits invalidate review; approval requires matching saved validation, a fresh fingerprint, a nonempty audience and a human checkbox. On 409/412 refresh server state, retain local text read-only and require explicit reconciliation and renewed review. Never silently attach a fresh revision to stale content.
+Use a bounded fetch SSE reader, cancel on navigation, reset provisional content on each provider attempt, and reject incomplete/malformed streams. A validated suggestion still requires an explicit full-set save using its base_revision. Save/segment edits invalidate review; approval requires matching saved validation, a fresh fingerprint, a nonempty audience and a human checkbox (the checkbox interaction is superseded by ADR-027). On 409/412 refresh server state, retain local text read-only and require explicit reconciliation and renewed review. Never silently attach a fresh revision to stale content.
 
 Add GET /campaigns with descending primary-key cursors (default 20, maximum 100) and GET /metrics with PostgreSQL aggregate reads. Reuse delivery-status for campaign polling every 2 seconds, with 5-second retry on errors, no overlapping polls, cancellation on unmount and stop at terminal campaign status. This replaces the delivery skill's proposed dashboard SSE transport for this milestone, per the explicitly approved polling scope; message generation remains SSE.
 
@@ -350,3 +350,33 @@ Status: Accepted (2026-10-25); verification evidence is recorded in README.
 **Alternatives.** Retain PostgreSQL 17, or migrate its existing data; neither matches the approved development scope.
 
 **Consequences.** Development starts with fresh data. Existing volumes remain untouched and are not reused. No data conversion tooling or application schema change is needed. Verify fresh startup, migrations, persistence, database integration and mock-only API behavior before accepting this decision.
+
+## ADR-027: Explicit review dialog and audit-preserving draft deletion
+
+Status: Accepted (2026-10-25). Backend, Vue, PostgreSQL and browser checks are recorded in README.
+
+**Context.** The existing review checkbox resets on navigation, the empty-list plus has no action, and restrictive campaign foreign keys preserve saved templates, LLM audits and delivery history. The case study requires explicit human approval and does not require physical deletion.
+
+**Decision.** Replace ADR-025's checkbox interaction with a fresh review dialog showing consent-filtered counts, channels and saved templates. Its final confirmation button is the sole UI approval action. Reopening review fetches a fresh snapshot; no approval or checkbox state is restored. Preserve all revision/ETag/fingerprint checks and conflict reconciliation. Make the empty-list plus focus the existing creation form.
+
+Add bodyless, revision-checked DELETE with logical deletion for draft/content_ready campaigns only. Lock the campaign, reject any approval metadata or delivery rows, retain all related records, record deleted_at in UTC and increment revision while moving the retained row to cancelled. Hide deleted campaigns from application reads and mutations. Keep LLM audit insertion possible for calls already underway, preserving audited metrics. No cascades, new dependency or queue/worker redesign.
+
+**Alternatives.** Physically delete campaigns plus audit rows (loses evidence/metrics); detach audits through a schema redesign (unnecessary); reject every draft with LLM calls (prevents useful deletion); persist checkbox acceptance (can imply approval of stale inputs).
+
+**Consequences.** Workspace deletion is permanent through the UI but retains storage. No restore or purge API, retention scheduler or actor identity is added. Completed/approved/sending/cancelled campaigns and delivery history remain protected. Existing local-only access assumptions remain; confirmation does not authenticate a human. ADR-025's other architecture choices and ADR-023's approval transaction remain in force.
+
+## ADR-028: Lightweight interface localization and locally bundled API documentation
+
+Status: Accepted (2026-10-25). Executed verification is recorded in README.
+
+**Context.** The Vue interface needs English and Turkish while campaign content must remain authored data. The developer experience needs an accurate OpenAPI description and a local viewer, with no endpoint redesign or external runtime asset requests.
+
+**Decision.** Use one typed English-key/Turkish-value catalog and one shared reactive locale ref; default to English on page load. Translate interface copy and safe error-code mappings at render time, with Intl en-US/tr-TR formatting. Preserve all brief/template/stream/prompt/API data and machine identifiers. Do not persist the language preference or infer it from browser settings in this scope.
+
+Add canonical docs/openapi.json in OpenAPI 3.2.1, verified against the official published release/schema. Embed it in Go and expose bodyless GET /openapi.json. Keep existing routes, payloads, lifecycle/ETag/fingerprint rules and errors unchanged. Add tests for route/reference, response DTO-field and Postman request coverage. The main campaign API is the specification's scope; the internal mock ingress/debug contract stays in README.
+
+Use registry-verified swagger-ui-dist 5.34.0, exactly pinned as a build-time dependency, in a separate Vite docs entry at /docs/. Bundle its assets locally and disable the remote validator. Allow only GET try-it-out to keep writes in the explicit campaign workflow. Scope the required inline-style permission to the docs HTML; the application's existing CSP is retained. Existing ignore-scripts installation avoids transitive Scarf install-time telemetry. No runtime i18n package, Go library or persistence migration is added.
+
+**Alternatives.** A general i18n framework (unneeded for two languages and a small SPA); automatic content/brief translation (violates authored-data preservation); CDN Swagger assets/validator (network dependence and broader CSP); injecting Swagger into the app bundle (unnecessary campaign-page weight); generated server scaffolding (risks changing implemented contracts).
+
+**Consequences.** Language resets to English on reload; developer docs/raw telemetry stay English. Swagger adds a separate roughly 1.5 MB script and a build size advisory, loaded only on the docs page. UI confirmation and API preconditions still do not authenticate or authorize callers. JSON Schema validation does not establish runtime parity, so maintained checks and executable Postman/browser/backend regressions remain necessary.

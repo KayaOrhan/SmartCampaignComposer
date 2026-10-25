@@ -715,7 +715,7 @@
     {
       "name": "Unsupported method",
       "request": {
-        "method": "DELETE",
+        "method": "PATCH",
         "header": [],
         "url": "{{baseUrl}}/campaigns/{{campaignId}}"
       },
@@ -3369,6 +3369,526 @@
         }
       ],
       "name": "Campaign dashboard reads"
+    },
+    {
+      "name": "Draft campaign deletion",
+      "item": [
+        {
+          "name": "Create disposable draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"brief\": \"Synthetic deletion regression\", \"channels\": [\"sms\"]}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.variables.set(\"deletionId\", pm.response.json().id); pm.variables.set(\"deletionETag\", pm.response.headers.get(\"ETag\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete requires revision",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 428\", () => pm.response.to.have.status(428));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete rejects body",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 422\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete empty draft",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));",
+                  "pm.test(\"No response body\",()=>pm.expect(pm.response.text()).to.eql(\"\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deleted campaign hidden",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Repeated deletion is absent",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create draft with audit and saved content",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"brief\": \"Synthetic audited deletion regression\", \"channels\": [\"sms\"]}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.variables.set(\"deletionId\", pm.response.json().id); pm.variables.set(\"deletionETag\", pm.response.headers.get(\"ETag\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Generate audited segment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}/generate-segment"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.variables.set(\"deletionETag\", pm.response.headers.get(\"ETag\"));",
+                  "pm.variables.set(\"deletionStaleETag\", pm.response.headers.get(\"ETag\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Save content before deletion",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}/messages",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"messages\": {\"sms\": {\"body\": \"Hello {{first_name}}\"}}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.variables.set(\"deletionETag\", pm.response.headers.get(\"ETag\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Stale deletion rejected",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionStaleETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 412\", () => pm.response.to.have.status(412));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete unapproved content ready campaign",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deleted campaign unavailable /messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}/messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deleted campaign unavailable /delivery-status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}/delivery-status"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deleted campaign unavailable /audience-preview",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}/audience-preview"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deleted campaign unavailable /generate-segment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}/generate-segment"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deleted campaign unavailable /generate-messages",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{deletionETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{deletionId}}/generate-messages"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deleted campaign absent from list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Deleted campaign is not listed\",()=>pm.expect(pm.response.json().campaigns.some(c=>String(c.id)===String(pm.variables.get(\"deletionId\")))).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read protected completed campaign",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete completed campaign rejected",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "If-Match",
+                "value": "{{campaignETag}}"
+              }
+            ],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delivery history remains available",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/campaigns/{{campaignId}}/delivery-status"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"History retained\",()=>pm.expect(pm.response.json().counts.total).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "API documentation",
+      "item": [
+        {
+          "name": "Read OpenAPI specification",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/openapi.json"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "pm.test(\"JSON and no-store\",()=>{pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\");});",
+                  "const spec=pm.response.json();",
+                  "pm.test(\"OpenAPI version and unauthenticated contract\",()=>{pm.expect(spec.openapi).to.eql(\"3.2.1\");pm.expect(spec.security).to.deep.eql([]);pm.expect(spec.info.description).to.include(\"NO authentication\");});",
+                  "pm.test(\"Revision and streaming contracts\",()=>{pm.expect(spec.paths[\"/campaigns/{id}/approve\"].post.parameters.some(p=>p.$ref===\"#/components/parameters/IfMatch\")).to.eql(true);pm.expect(spec.paths[\"/campaigns/{id}/generate-messages\"].post.responses[\"200\"].content[\"text/event-stream\"].itemSchema.$ref).to.eql(\"#/components/schemas/SSEEvent\");});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

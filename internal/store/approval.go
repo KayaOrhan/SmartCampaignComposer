@@ -87,7 +87,7 @@ func (s Campaigns) ApprovalPreview(ctx context.Context, id int64, asOf time.Time
 		return result, databaseError(err)
 	}
 	defer finishTx(tx, &resultErr)
-	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1`, id))
+	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL`, id))
 	if err != nil {
 		return result, err
 	}
@@ -117,7 +117,7 @@ func (s Campaigns) Approve(ctx context.Context, id, expected int64, fingerprint 
 		return result, databaseError(err)
 	}
 	defer finishTx(tx, &resultErr)
-	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 FOR UPDATE`, id))
+	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id))
 	if err != nil {
 		return result, err
 	}
@@ -126,7 +126,7 @@ func (s Campaigns) Approve(ctx context.Context, id, expected int64, fingerprint 
 	}
 	if c.Status == "sending" || c.Status == "completed" {
 		var existing sql.NullString
-		if err := tx.QueryRowContext(ctx, `SELECT approval_fingerprint FROM app.campaigns WHERE id=$1`, id).Scan(&existing); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT approval_fingerprint FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL`, id).Scan(&existing); err != nil {
 			return result, databaseError(err)
 		}
 		if !existing.Valid || existing.String != fingerprint {
@@ -191,7 +191,7 @@ func (s Campaigns) GetDeliveryStatus(ctx context.Context, id int64) (result camp
 		return result, databaseError(err)
 	}
 	defer finishTx(tx, &resultErr)
-	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1`, id))
+	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL`, id))
 	if err != nil {
 		return result, err
 	}
@@ -209,7 +209,7 @@ func deliveryStatusInTx(ctx context.Context, tx *sql.Tx, c campaign.Campaign) (r
 	result = campaign.DeliveryStatus{CampaignID: c.ID, Revision: c.Revision, Status: c.Status, ByChannel: map[string]campaign.DeliveryCounts{}}
 	var at sql.NullTime
 	var source sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT approved_at,approved_revision FROM app.campaigns WHERE id=$1`, c.ID).Scan(&at, &source); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT approved_at,approved_revision FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL`, c.ID).Scan(&at, &source); err != nil {
 		return result, databaseError(err)
 	}
 	if at.Valid {

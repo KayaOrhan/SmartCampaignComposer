@@ -78,3 +78,11 @@ Approved continuation of the original deliveries milestone, not a new numbered s
 ## PostgreSQL 18.6 development upgrade
 
 Approved on 2026-10-25: update the official digest-pinned Alpine image and PostgreSQL 18 volume layout, using fresh development storage. Retain application migrations and pgx; no historical data conversion. Update README and ADR-026, then verify make check, PostgreSQL integration, startup/restart persistence and local mock-only Postman behavior. Completed: checks, PostgreSQL integration, local mock-only Postman and container recreation persistence passed; see README for evidence.
+
+## Focused campaign UX and safe draft deletion
+
+Approved on 2026-10-25: make the empty-state plus focus the existing create form; replace repeated review checkboxes with a fresh audience/channel/saved-template confirmation dialog; preserve approval preconditions; add confirmed logical deletion for unapproved draft/content_ready campaigns with no approval or delivery history. Scope includes migration 009, guarded store/HTTP paths, Vue dialogs and state, Postman and regression tests, plus canonical documentation and session index. No application redesign, dependencies, real service calls or commit. See ADR-027 and README for contracts, executed verification and retention limitations.
+
+## English/Turkish interface and OpenAPI documentation
+
+Approved on 2026-10-25: typed lightweight UI dictionaries, visible switcher and Intl formatting, with authored campaign/AI data unchanged; canonical OpenAPI 3.2.1 and locally bundled Swagger UI; documentation/route/DTO/Postman consistency and locale/content regression tests. Scope includes Vue source/tests, pinned Swagger build dependency, a separate docs build entry/CSP, embedded spec endpoint and Docker source packaging, maintained Postman assertions and project/session documentation. Existing business API contracts, approval/deletion protections and database schema remain unchanged. No unrelated architecture, real service calls or commits. See ADR-028 and README for exact behavior, verification and limitations.

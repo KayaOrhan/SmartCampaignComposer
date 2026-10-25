@@ -1,3 +1,4 @@
+import { t, type MessageKey } from './i18n'
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { api, ApiError, errorMessage } from './api'
 import { generateMessages } from './stream'
@@ -6,13 +7,17 @@ import type { Campaign, Messages, Preview, SavedMessages } from './types'
 const copy = (messages: Messages | null): Messages => JSON.parse(JSON.stringify(messages ?? {})) as Messages
 export function useCampaign(initial: Campaign) {
   const campaign = ref(initial), saved = ref<SavedMessages | null>(null), messages = ref<Messages>({})
-  const audience = ref<Preview | null>(null), review = ref(false), error = ref(''), notice = ref('')
-  const busy = ref(''), stale = ref(false), candidateRevision = ref<number | null>(null)
+  const audience = ref<Preview | null>(null), review = ref(false), failure = ref<unknown>(null), notice = ref<MessageKey | ''>('')
+  const refreshFailed = ref(false)
+  const error = computed(() => failure.value ? errorMessage(failure.value) + (refreshFailed.value ? ' ' + t('Refresh failed; retry refreshing before continuing.') : '') : '')
+  const deleted = ref(false)
+  const busy = ref<MessageKey | ''>(''), stale = ref(false), candidateRevision = ref<number | null>(null)
   const streamPreview = ref<Messages>({}), attempt = ref(0), generated = ref(false)
   let controller: AbortController | null = null, disposed = false
   const editable = computed(() => ['draft', 'content_ready'].includes(campaign.value.status))
   const dirty = computed(() => JSON.stringify(messages.value) !== JSON.stringify(saved.value?.messages ?? {}))
   const canSave = computed(() => editable.value && !busy.value && !stale.value && candidateRevision.value !== null && campaign.value.channels.every(ch => Boolean(messages.value[ch]?.body.trim())))
+  const canReview = computed(() => !busy.value && !stale.value && !dirty.value && !generated.value && campaign.value.status === 'content_ready' && saved.value?.validation?.revision === campaign.value.revision)
   const canApprove = computed(() => !busy.value && !stale.value && !dirty.value && !generated.value && review.value && campaign.value.status === 'content_ready' && saved.value?.validation?.revision === campaign.value.revision && audience.value?.revision === campaign.value.revision && Boolean(audience.value.approval_fingerprint) && audience.value.eligible_unique > 0)
   function invalidateReview() { review.value = false; audience.value = null }
   async function load(signal: AbortSignal, replace: boolean) {
@@ -24,17 +29,17 @@ export function useCampaign(initial: Campaign) {
     campaign.value = c; saved.value = m
     if (replace) { messages.value = copy(m.messages); candidateRevision.value = c.revision; generated.value = false; stale.value = false; streamPreview.value = {} }
   }
-  async function run(label: string, action: (signal: AbortSignal) => Promise<void>) {
+  async function run(label: MessageKey, action: (signal: AbortSignal) => Promise<void>) {
     if (busy.value) return
-    const current = new AbortController(); controller = current; busy.value = label; error.value = ''; notice.value = ''
+    const current = new AbortController(); controller = current; busy.value = label; failure.value = null; refreshFailed.value = false; notice.value = ''
     const signal = AbortSignal.any([current.signal, AbortSignal.timeout(40000)])
     try { await action(signal) }
     catch (e) {
       if (disposed) return
-      error.value = errorMessage(e)
+      failure.value = e
       if (e instanceof ApiError && [409, 412].includes(e.status)) {
         stale.value = true; invalidateReview()
-        try { await load(signal, false) } catch { error.value += ' Refresh failed; retry refreshing before continuing.' }
+        try { await load(signal, false) } catch { refreshFailed.value = true }
       }
     } finally { if (controller === current) { busy.value = ''; controller = null } }
   }
@@ -85,6 +90,18 @@ export function useCampaign(initial: Campaign) {
       notice.value = 'Messages saved and validated. Review the current audience before approval.'
     })
   }
+  async function openReview() {
+    if (!canReview.value) return
+    await preview()
+    if (!error.value && !stale.value && audience.value) review.value = true
+  }
+  function remove() {
+    if (!editable.value || busy.value || stale.value) return
+    return run('Deleting campaign', async signal => {
+      await api.remove(campaign.value, signal)
+      deleted.value = true
+    })
+  }
   function approve() {
     if (!canApprove.value || !audience.value) return
     const snapshot = audience.value
@@ -96,5 +113,5 @@ export function useCampaign(initial: Campaign) {
     })
   }
   onBeforeUnmount(() => { disposed = true; controller?.abort() })
-  return { campaign, saved, messages, audience, review, error, notice, busy, stale, dirty, editable, canSave, canApprove, generated, streamPreview, attempt, refresh, edit, segment, preview, generate, save, approve, cancel: () => controller?.abort() }
+  return { deleted, remove, openReview, canReview, campaign, saved, messages, audience, review, error, notice, busy, stale, dirty, editable, canSave, canApprove, generated, streamPreview, attempt, refresh, edit, segment, preview, generate, save, approve, cancel: () => controller?.abort() }
 }

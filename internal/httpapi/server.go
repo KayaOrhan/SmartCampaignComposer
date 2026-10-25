@@ -6,11 +6,14 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/KayaOrhan/SmartCampaignComposer/docs"
 )
 
 // Handler takes a context-aware database check so unit tests need no database.
 func Handler(ping func(context.Context) error, timeout time.Duration, campaigns CampaignStore, generator SegmentGenerator, messages MessageGenerator, generationTimeout time.Duration) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /openapi.json", func(w http.ResponseWriter, r *http.Request) { respond(w, http.StatusOK, docs.OpenAPI) })
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusOK, `{"status":"ok"}`)
 	})

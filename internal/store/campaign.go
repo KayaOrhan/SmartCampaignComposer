@@ -63,7 +63,7 @@ const campaignColumns = `id,brief,channels,segment_json,status,created_at,revisi
 func (s Campaigns) Get(ctx context.Context, id int64) (campaign.Campaign, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
-	return readCampaign(s.DB.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1`, id))
+	return readCampaign(s.DB.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL`, id))
 }
 
 func (s Campaigns) PutSegment(ctx context.Context, id, expected int64, v segment.Validated) (result campaign.Campaign, resultErr error) {
@@ -77,7 +77,7 @@ func (s Campaigns) PutSegment(ctx context.Context, id, expected int64, v segment
 		return result, ErrUnavailable
 	}
 	defer finishTx(tx, &resultErr)
-	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 FOR UPDATE`, id))
+	c, err := readCampaign(tx.QueryRowContext(ctx, `SELECT `+campaignColumns+` FROM app.campaigns WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id))
 	if err != nil {
 		return result, err
 	}

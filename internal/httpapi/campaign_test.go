@@ -33,6 +33,11 @@ func (f *fakeCampaignStore) Create(ctx context.Context, d campaign.Draft) (campa
 	f.called(ctx)
 	return campaign.Campaign{ID: 1, Revision: 1, Brief: d.Brief, Channels: d.Channels, Status: "draft"}, f.err
 }
+func (f *fakeCampaignStore) Delete(ctx context.Context, id, expected int64, at time.Time) error {
+	f.called(ctx)
+	f.asOf = at
+	return f.err
+}
 func (f *fakeCampaignStore) Get(ctx context.Context, id int64) (campaign.Campaign, error) {
 	f.called(ctx)
 	return campaign.Campaign{ID: id}, f.err
@@ -99,7 +104,12 @@ func TestCampaignRoutes(t *testing.T) {
 		{"oversized", "POST", "/campaigns", strings.Repeat("a", segment.MaxJSONBytes+1), nil, 413, 0},
 		{"oversized segment", "PUT", "/campaigns/1/segment", strings.Repeat(" ", segment.MaxJSONBytes) + valid, nil, 413, 0},
 		{"preview body", "POST", "/campaigns/1/audience-preview", `{"channel":"push"}`, nil, 422, 0},
-		{"wrong method", "DELETE", "/campaigns/1", "", nil, 405, 0},
+		{"delete", "DELETE", "/campaigns/1", "", nil, 204, 1},
+		{"delete state", "DELETE", "/campaigns/1", "", campaign.ErrState, 409, 1},
+		{"delete stale", "DELETE", "/campaigns/1", "", campaign.ErrRevision, 412, 1},
+		{"delete missing", "DELETE", "/campaigns/1", "", campaign.ErrNotFound, 404, 1},
+		{"delete body", "DELETE", "/campaigns/1", "{}", nil, 422, 0},
+		{"wrong method", "PATCH", "/campaigns/1", "", nil, 405, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &fakeCampaignStore{err: tc.err}

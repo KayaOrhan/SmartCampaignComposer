@@ -1,6 +1,7 @@
 import { defineComponent } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
+import { setLocale } from './i18n'
 import { api, ApiError } from './api'
 import { useCampaign } from './useCampaign'
 import type { Campaign, Preview, SavedMessages } from './types'
@@ -79,4 +80,53 @@ it('cancels an active request on unmount', async () => {
   vi.mocked(api.get).mockImplementation((_id, s) => { signal = s; return new Promise(() => {}) })
   void state.refresh(); await flushPromises(); wrapper.unmount()
   expect(signal?.aborted).toBe(true)
+})
+
+it('opens a fresh review without approving, and requires confirmation each time', async () => {
+  const { state, wrapper } = setup()
+  const approve = vi.spyOn(api, 'approve').mockResolvedValue({ campaign_id: 3, revision: 6, status: 'sending', counts: { total: 1, pending: 1, in_flight: 0, sent: 0, dead: 0, skipped: 0 }, by_channel: {}, approved_at: '', approved_revision: 5 })
+  await state.refresh(); await state.openReview()
+  expect(state.review.value).toBe(true)
+  expect(state.canApprove.value).toBe(true)
+  expect(approve).not.toHaveBeenCalled()
+  state.review.value = false
+  await state.approve()
+  expect(approve).not.toHaveBeenCalled()
+  await state.refresh(); await state.openReview()
+  expect(api.preview).toHaveBeenCalledTimes(2)
+  expect(approve).not.toHaveBeenCalled()
+  await state.approve()
+  expect(approve).toHaveBeenCalledWith(3, preview, expect.any(AbortSignal))
+  expect(approve).toHaveBeenCalledTimes(1)
+  wrapper.unmount()
+})
+it('does not delete a stale or immutable campaign and never silently retries deletion', async () => {
+  const { state, wrapper } = setup()
+  const remove = vi.spyOn(api, 'remove').mockRejectedValue(new ApiError(412, 'campaign_revision_conflict'))
+  await state.refresh(); await state.remove()
+  expect(state.deleted.value).toBe(false)
+  expect(state.stale.value).toBe(true)
+  await state.remove()
+  expect(remove).toHaveBeenCalledTimes(1)
+  await state.refresh()
+  state.campaign.value = { ...campaign, status: 'sending' }
+  await state.remove()
+  expect(remove).toHaveBeenCalledTimes(1)
+  wrapper.unmount()
+})
+
+it('updates an existing error on language switch without modifying authored templates', async () => {
+  const { state, wrapper } = setup()
+  await state.refresh()
+  const authored = { sms: { body: 'Draft {{first_name}} — Aynen koru' } }
+  state.edit(authored)
+  vi.spyOn(api, 'save').mockRejectedValue(new ApiError(422, 'message_too_long', 'sms.body'))
+  await state.save()
+  expect(state.error.value).toContain('Personalized message exceeds')
+  try {
+    setLocale('tr')
+    expect(state.error.value).toContain('Kişiselleştirilmiş mesaj')
+    expect(state.messages.value).toEqual(authored)
+    expect(state.campaign.value.brief).toBe(campaign.brief)
+  } finally { setLocale('en'); wrapper.unmount() }
 })

@@ -1,0 +1,1975 @@
+{
+  "openapi": "3.2.1",
+  "info": {
+    "title": "Smart Campaign Composer API",
+    "version": "1.0.0",
+    "description": "Local case-study API. NO authentication or authorization, ownership checks, tenancy, TLS or authenticated editor/reviewer identity. Anyone who can reach the API may read/mutate campaigns and request generation/approval/deletion subject to validation only. ETags and fingerprints prevent stale work; they are NOT access tokens. Bind only to trusted loopback. All delivery goes to the local mock provider; no real SMS/email service. Swagger UI at the web /docs/ uses the same-origin /api proxy. Worker/mock provider are separate internal services; mock ingress/debug and their health responses are documented in README, not part of the campaign API surface. UI language does not change API machine codes, campaign briefs, saved templates or LLM prompts. Campaign JSON bodies are limited to 32768 bytes. Unknown/duplicate/case-mismatched fields, invalid UTF-8, NUL and trailing JSON fail closed. Router-level unmatched paths/methods use Go text/plain 404/405 (Allow on 405), rather than the application JSON envelope. HEAD is accepted automatically for GET routes."
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "Same-origin web proxy on localhost:5173; Swagger UI default."
+    },
+    {
+      "url": "http://127.0.0.1:8080",
+      "description": "Direct loopback Go API (e.g. Postman/CLI); no browser CORS configured."
+    }
+  ],
+  "security": [],
+  "tags": [
+    {
+      "name": "Campaigns"
+    },
+    {
+      "name": "Generation"
+    },
+    {
+      "name": "Operations"
+    },
+    {
+      "name": "Documentation"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Process liveness",
+        "operationId": "get_health",
+        "tags": [
+          "Operations"
+        ],
+        "description": "Does not access PostgreSQL.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "ok",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "PostgreSQL readiness",
+        "operationId": "get_ready",
+        "tags": [
+          "Operations"
+        ],
+        "description": "Context-bounded database ping. Failure does not disclose database details.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "ready",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database ping failed or timed out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "const": "unavailable",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/campaigns": {
+      "get": {
+        "summary": "List visible campaigns",
+        "operationId": "get_campaigns",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "Newest ID first, default limit 20, maximum 100. before is an exclusive ID cursor. Unknown, repeated, zero, signed or leading-zero query values are rejected. Deleted drafts are omitted. No authentication, ownership or tenant filtering.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create a draft",
+        "operationId": "post_campaigns",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "Canonicalizes channels into sms,email order and trims the brief. Creation has no idempotency key: after a lost response check the list before retrying.",
+        "responses": {
+          "201": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Relative /campaigns/<id> URL."
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Draft"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/campaigns/{id}": {
+      "get": {
+        "summary": "Read a campaign",
+        "operationId": "get_campaigns_id",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Delete an unapproved draft",
+        "operationId": "delete_campaigns_id",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "Bodyless (whitespace tolerated). Only draft/content_ready with no approval metadata or delivery rows. Row-locked logical deletion preserves content/templates/LLM audit and increments revision once, setting deleted_at and retained status cancelled. Deleted campaigns are hidden from reads, generation and mutations. Repeat returns 404 with no side effect. Approved/sending/completed/cancelled campaigns and all delivery history are protected. No restore or purge endpoint.",
+        "responses": {
+          "204": {
+            "description": "Success",
+            "headers": {}
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "412": {
+            "$ref": "#/components/responses/412"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "428": {
+            "$ref": "#/components/responses/428"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ]
+      }
+    },
+    "/campaigns/{id}/segment": {
+      "put": {
+        "summary": "Save validated segment",
+        "operationId": "put_campaigns_id_segment",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "Editable draft/content_ready only. Validates and saves the DSL, increments revision, returns draft, retains saved text but invalidates message validation/review.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "412": {
+            "$ref": "#/components/responses/412"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "428": {
+            "$ref": "#/components/responses/428"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Segment"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/campaigns/{id}/generate-segment": {
+      "post": {
+        "summary": "Generate and save a segment",
+        "operationId": "post_campaigns_id_generate_segment",
+        "tags": [
+          "Generation"
+        ],
+        "description": "Bodyless; If-Match required. Calls the configured LLM using the stored brief, validates strict DSL and audit success, then rechecks editable state/revision before save. Mock default returns a deterministic sample regardless of the brief. Real Claude is optional runtime mode and never used in automated tests.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaign"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "412": {
+            "$ref": "#/components/responses/412"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "428": {
+            "$ref": "#/components/responses/428"
+          },
+          "502": {
+            "$ref": "#/components/responses/502"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          },
+          "504": {
+            "$ref": "#/components/responses/504"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ]
+      }
+    },
+    "/campaigns/{id}/audience-preview": {
+      "post": {
+        "summary": "Preview current consent-aware audience",
+        "operationId": "post_campaigns_id_audience_preview",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "Bodyless, draft/content_ready only with a segment. For content_ready also validates saved templates and returns a review fingerprint; for draft it is null. Capture ETag and fingerprint together for explicit human approval. Profile/consent changes can invalidate the fingerprint without changing campaign revision.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          }
+        ]
+      }
+    },
+    "/campaigns/{id}/messages": {
+      "get": {
+        "summary": "Read saved templates and historical validation",
+        "operationId": "get_campaigns_id_messages",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedMessages"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          }
+        ]
+      },
+      "put": {
+        "summary": "Explicitly save the complete template set",
+        "operationId": "put_campaigns_id_messages",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "Editable draft/content_ready only; replaces the complete selected-channel set atomically. Computes fresh audience bounds and validates all literal placeholders/rendered limits. Advances revision and status content_ready. Saved validation is historical, not approval or frozen membership. Use the generated candidate base_revision for If-Match; never attach a newer revision to stale generated content.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedMessages"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "412": {
+            "$ref": "#/components/responses/412"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "428": {
+            "$ref": "#/components/responses/428"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveMessages"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/campaigns/{id}/generate-messages": {
+      "post": {
+        "summary": "Stream provisional message suggestions",
+        "operationId": "post_campaigns_id_generate_messages",
+        "tags": [
+          "Generation"
+        ],
+        "description": "Bodyless POST with streaming fetch, not EventSource. No If-Match; this is preview-only. Reads campaign/audience in one snapshot and closes it before LLM calls. Does not save templates or change status/revision. Attempt numbers increase across bounded retries/repairs; reset provisional text on each attempt. Deltas are plain display text, not validated content. Only terminal validated establishes a complete validated candidate; explicit PUT messages using base_revision is still required. Error after stream start is an error event under HTTP 200 (llm_output_invalid, llm_timeout, llm_unavailable, llm_refused or llm_audit_unavailable with optional safe reasons). EOF without validated, malformed/incomplete events or cancellation must never permit approval. No event IDs, history or resume. Generation is context-bounded; proxy buffering disabled.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "X-Accel-Buffering": {
+                "schema": {
+                  "const": "no",
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "$ref": "#/components/schemas/SSEEvent"
+                },
+                "examples": {
+                  "attempt": {
+                    "value": "event: attempt\ndata: {\"attempt\":1}\n\n"
+                  },
+                  "delta": {
+                    "value": "event: delta\ndata: {\"attempt\":1,\"channel\":\"sms\",\"field\":\"body\",\"text\":\"Hello\"}\n\n"
+                  },
+                  "error": {
+                    "value": "event: error\ndata: {\"attempt\":1,\"error\":{\"code\":\"llm_timeout\",\"path\":\"$\"}}\n\n"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          }
+        ]
+      }
+    },
+    "/campaigns/{id}/approve": {
+      "post": {
+        "summary": "Explicitly approve and atomically enqueue",
+        "operationId": "post_campaigns_id_approve",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "Requires explicit human confirmation of saved content, current nonempty audience and selected channels. Only content_ready with current saved validation may first approve. Send the reviewed audience-preview ETag in If-Match and its approval_fingerprint in JSON. The transaction locks campaign, recomputes membership/content/consent, checks revision and fingerprint, revalidates rendered limits, freezes personalized jobs and moves atomically to sending with one revision increment. Empty audience rejected. Changed fingerprint returns 409 with safe updated preview; require new human review, never auto-approve or blindly retry. Same-count membership/profile changes are detected. After a lost response reconcile via GET: repeat with current revision and original fingerprint returns existing sending/completed receipt without duplicate enqueue or mutation; old revision still 412. Confirmation is a UI safeguard, not authenticated reviewer identity.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              },
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "approval_preview_changed returns error plus the updated aggregate preview; other conflicts return the normal error envelope. Nothing enqueued on failure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApprovalChanged"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "412": {
+            "$ref": "#/components/responses/412"
+          },
+          "413": {
+            "$ref": "#/components/responses/413"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "428": {
+            "$ref": "#/components/responses/428"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Approve"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/campaigns/{id}/delivery-status": {
+      "get": {
+        "summary": "Read aggregate durable delivery progress",
+        "operationId": "get_campaigns_id_delivery_status",
+        "tags": [
+          "Campaigns"
+        ],
+        "description": "No ETag on this response; use GET campaign for mutation preconditions. Poll persisted counts, not in-memory counters. pending includes retry waits; in_flight is a leased claim; sent means mock acknowledgement, dead means permanent failure/exhausted attempts, skipped means safety gate prevented dispatch. completed means no pending/in_flight jobs and can include dead/skipped. Counts are current state, not cumulative attempts. Frozen payloads never returned. Worker progress never changes campaign revision. Max five processing claims, bounded backoff/recovery; mock idempotency deduplicates simulated acceptance, not acknowledgement reconciliation. Consent rechecked before dispatch; changes after that check can race with HTTP.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CampaignID"
+          }
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "summary": "Prometheus aggregate metrics",
+        "operationId": "get_metrics",
+        "tags": [
+          "Operations"
+        ],
+        "description": "Fixed labels only: deliveries{channel,status} gauge, queue_depth{channel} gauge, llm_calls_total{call,outcome} counter, llm_validation_failures_total{call} counter. Persisted audit counters include deleted drafts. No recipient IDs, bodies, destinations or campaign labels. Counters reset when the database is reset; not an attempts/latency histogram.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "text/plain; version=0.0.4; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/503"
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "Read this OpenAPI document",
+        "operationId": "get_openapi_json",
+        "tags": [
+          "Documentation"
+        ],
+        "description": "Embedded canonical docs/openapi.json, no authentication required.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "headers": {
+              "Cache-Control": {
+                "$ref": "#/components/headers/NoStore"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "openapi",
+                    "info",
+                    "paths"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Channel": {
+        "type": "string",
+        "enum": [
+          "sms",
+          "email"
+        ]
+      },
+      "CampaignState": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "content_ready",
+          "approved",
+          "sending",
+          "completed",
+          "cancelled"
+        ],
+        "description": "draft -> content_ready -> approved -> sending -> completed; cancelled is terminal. Approval atomically transitions content_ready through approved to sending; approved is not a separately observable API step. Segment writes return editable campaigns to draft, retaining templates but invalidating their validation. Message saves move to content_ready. No edit after approval. No cancellation endpoint exists. Draft deletion creates a hidden cancelled tombstone, not a public state change endpoint."
+      },
+      "Draft": {
+        "type": "object",
+        "properties": {
+          "brief": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Trimmed, nonempty UTF-8, at most 4000 runes; no NUL."
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "sms",
+                "email"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "brief",
+          "channels"
+        ],
+        "additionalProperties": false
+      },
+      "Campaign": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "brief": {
+            "type": "string"
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "sms",
+                "email"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 2
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Segment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/CampaignState"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "brief",
+          "channels",
+          "segment",
+          "status",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "CampaignPage": {
+        "type": "object",
+        "properties": {
+          "campaigns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Campaign"
+            }
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "campaigns",
+          "next_before"
+        ],
+        "additionalProperties": false
+      },
+      "Bounds": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_first_name_runes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 80
+          },
+          "max_city_runes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 120
+          }
+        },
+        "required": [
+          "count",
+          "max_first_name_runes",
+          "max_city_runes"
+        ],
+        "additionalProperties": false
+      },
+      "Audience": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "eligible_unique": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "by_channel": {
+            "type": "object",
+            "properties": {
+              "sms": {
+                "$ref": "#/components/schemas/Bounds"
+              },
+              "email": {
+                "$ref": "#/components/schemas/Bounds"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "as_of",
+          "eligible_unique",
+          "by_channel"
+        ],
+        "additionalProperties": false
+      },
+      "SMS": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2240,
+            "description": "Raw template ceiling; the actual limit is 160 Unicode runes after conservative worst-case personalization. Repeated variables count every time. Unknown/malformed variables and NUL are rejected."
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "Email": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1120,
+            "description": "Raw template ceiling; at most 80 runes after worst-case personalization."
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 28000,
+            "description": "Raw template ceiling; at most 2000 runes after worst-case personalization. Fields must be nonblank and NUL-free."
+          }
+        },
+        "required": [
+          "subject",
+          "body"
+        ],
+        "additionalProperties": false
+      },
+      "Messages": {
+        "type": "object",
+        "properties": {
+          "sms": {
+            "$ref": "#/components/schemas/SMS"
+          },
+          "email": {
+            "$ref": "#/components/schemas/Email"
+          }
+        },
+        "required": [],
+        "additionalProperties": false,
+        "minProperties": 1,
+        "description": "Exactly the complete selected-channel set. Allowed variables are literal {{first_name}} and {{city}}. Current audience maxima are applied independently and simultaneously; zero-count channels use full profile schema bounds (80/120). No HTML execution or recursive template expansion."
+      },
+      "MessageValidation": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "audience": {
+            "$ref": "#/components/schemas/Audience"
+          }
+        },
+        "required": [
+          "revision",
+          "audience"
+        ],
+        "additionalProperties": false
+      },
+      "SavedMessages": {
+        "type": "object",
+        "properties": {
+          "campaign_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "status": {
+            "$ref": "#/components/schemas/CampaignState"
+          },
+          "messages": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Messages"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageValidation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "campaign_id",
+          "revision",
+          "status",
+          "messages",
+          "validation"
+        ],
+        "additionalProperties": false
+      },
+      "SaveMessages": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "$ref": "#/components/schemas/Messages"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "Approve": {
+        "type": "object",
+        "properties": {
+          "approval_fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "approval_fingerprint"
+        ],
+        "additionalProperties": false
+      },
+      "DeliveryCounts": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pending": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "in_flight": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sent": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "dead": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "total",
+          "pending",
+          "in_flight",
+          "sent",
+          "dead",
+          "skipped"
+        ],
+        "additionalProperties": false
+      },
+      "DeliveryStatus": {
+        "type": "object",
+        "properties": {
+          "campaign_id": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "status": {
+            "$ref": "#/components/schemas/CampaignState"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approved_revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "counts": {
+            "$ref": "#/components/schemas/DeliveryCounts"
+          },
+          "by_channel": {
+            "type": "object",
+            "properties": {
+              "sms": {
+                "$ref": "#/components/schemas/DeliveryCounts"
+              },
+              "email": {
+                "$ref": "#/components/schemas/DeliveryCounts"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "campaign_id",
+          "revision",
+          "status",
+          "approved_at",
+          "approved_revision",
+          "counts",
+          "by_channel"
+        ],
+        "additionalProperties": false
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "ValidationError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "path"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Attempt": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "attempt"
+        ],
+        "additionalProperties": false
+      },
+      "Delta": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "sms",
+              "email"
+            ]
+          },
+          "field": {
+            "type": "string",
+            "enum": [
+              "subject",
+              "body"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "At most 1024 UTF-8 bytes per delta; 32768 display bytes per attempt. SMS has body only; email may have subject/body."
+          }
+        },
+        "required": [
+          "attempt",
+          "channel",
+          "field",
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "Validated": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "base_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "messages": {
+            "$ref": "#/components/schemas/Messages"
+          },
+          "audience": {
+            "$ref": "#/components/schemas/Audience"
+          }
+        },
+        "required": [
+          "attempt",
+          "base_revision",
+          "messages",
+          "audience"
+        ],
+        "additionalProperties": false
+      },
+      "StreamError": {
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "attempt",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "ApprovalPreview": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "eligible_unique": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "by_channel": {
+            "type": "object",
+            "properties": {
+              "sms": {
+                "$ref": "#/components/schemas/Bounds"
+              },
+              "email": {
+                "$ref": "#/components/schemas/Bounds"
+              }
+            },
+            "additionalProperties": false
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "approval_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "as_of",
+          "eligible_unique",
+          "by_channel",
+          "revision",
+          "approval_fingerprint"
+        ],
+        "additionalProperties": false,
+        "description": "For content_ready, recomputes consent-aware membership and validates saved templates. Fingerprint hashes campaign revision/channels/templates and ordered recipient/channel/destination/rendered content, excluding as_of. Null fingerprint for drafts or empty content_ready audience. Only aggregate data is exposed."
+      },
+      "ApprovalChanged": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/ApprovalPreview"
+          }
+        },
+        "required": [
+          "error",
+          "preview"
+        ],
+        "additionalProperties": false
+      },
+      "Segment": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "const": 1,
+            "type": "integer"
+          },
+          "all": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "const": "city"
+                    },
+                    "op": {
+                      "enum": [
+                        "in"
+                      ],
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      }
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "op",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "const": "language"
+                    },
+                    "op": {
+                      "enum": [
+                        "in"
+                      ],
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 16
+                      }
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "op",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "const": "cart_added"
+                    },
+                    "op": {
+                      "enum": [
+                        "within_days"
+                      ],
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 365
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "op",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "field": {
+                      "const": "purchase"
+                    },
+                    "op": {
+                      "enum": [
+                        "within_days",
+                        "none_within_days"
+                      ],
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 365
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "op",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "version",
+          "all"
+        ],
+        "additionalProperties": false,
+        "description": "Strict AND-only DSL. Unknown/case-mismatched and duplicate keys, null, malformed UTF-8, nesting over 16 and trailing JSON rejected. City normalization: NFC, trim, Turkish lowercase plus Istanbul aliases; values must be nonblank. Language codes follow backend validation. UTC windows are [as_of-N*24h,as_of). Consent is mandatory per selected channel and is not expressible in this DSL. none_within_days means no purchase during the window, not necessarily since cart addition."
+      },
+      "SSEEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "const": "attempt"
+              },
+              "data": {
+                "type": "string",
+                "contentMediaType": "application/json",
+                "contentSchema": {
+                  "$ref": "#/components/schemas/Attempt"
+                }
+              }
+            },
+            "required": [
+              "event",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "const": "delta"
+              },
+              "data": {
+                "type": "string",
+                "contentMediaType": "application/json",
+                "contentSchema": {
+                  "$ref": "#/components/schemas/Delta"
+                }
+              }
+            },
+            "required": [
+              "event",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "const": "validated"
+              },
+              "data": {
+                "type": "string",
+                "contentMediaType": "application/json",
+                "contentSchema": {
+                  "$ref": "#/components/schemas/Validated"
+                }
+              }
+            },
+            "required": [
+              "event",
+              "data"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "const": "error"
+              },
+              "data": {
+                "type": "string",
+                "contentMediaType": "application/json",
+                "contentSchema": {
+                  "$ref": "#/components/schemas/StreamError"
+                }
+              }
+            },
+            "required": [
+              "event",
+              "data"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "SSE wire frame: event: <name> followed by data: <one JSON object> and a blank line. The data field is JSON-encoded text, not a nested JSON object on the wire. Attempt restarts discard all provisional display text. Exactly one terminal validated/error event on an intact stream; disconnect may truncate it."
+      }
+    },
+    "parameters": {
+      "CampaignID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^\"campaign-[1-9][0-9]*-r[1-9][0-9]*\"$"
+        },
+        "description": "Exactly one strong ETag for this campaign and the representation being changed. No wildcard, weak tag, token list or leading-zero revision. Missing: 428; malformed/wrong campaign: 400; stale revision: 412. Obtain from GET campaign/messages or the current approval-preview. Never silently refresh tokens and retry stale edits/approval."
+      }
+    },
+    "headers": {
+      "ETag": {
+        "schema": {
+          "type": "string"
+        },
+        "description": "Strong campaign revision tag: \"campaign-<id>-r<revision>\". Successful mutations increment once; delivery progress does not change revision."
+      },
+      "NoStore": {
+        "schema": {
+          "const": "no-store",
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "400": {
+        "description": "Malformed JSON or If-Match (invalid_json, invalid_revision).",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "campaign_not_found, including logically deleted campaigns.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "invalid_campaign_state, segment_required, empty_audience or concurrent_update; reconcile and explicitly review again.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "412": {
+        "description": "campaign_revision_conflict; old If-Match changes nothing.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "413": {
+        "description": "body_too_large; campaign request bodies are capped at 32768 bytes.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "422": {
+        "description": "Schema/domain failure: unknown_field, invalid_shape, invalid_campaign_id, invalid_brief, invalid_channels, body_not_allowed, json_content_type_required, invalid_pagination, invalid_approval_fingerprint, invalid_placeholder, unknown_variable, message_too_long and other validated DSL errors. No partial mutation.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "428": {
+        "description": "revision_required; If-Match is mandatory.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "500": {
+        "description": "internal_error; response encoding failed.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "502": {
+        "description": "llm_output_invalid or llm_refused. No generated segment is saved.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "503": {
+        "description": "database_unavailable, llm_unavailable or llm_audit_unavailable. No private driver/provider details.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "504": {
+        "description": "llm_timeout; bounded generation deadline exceeded.",
+        "headers": {
+          "Cache-Control": {
+            "$ref": "#/components/headers/NoStore"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}

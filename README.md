@@ -61,7 +61,7 @@ The default Compose application has **one PostgreSQL instance** (`db`), **one ap
 | LLM audit / seed marker | `app.llm_calls`, `app.seed_runs` |
 | Migration ledger (schema exception) | `public.schema_migrations` |
 
-[Migrations 001-008](migrations) define the application schema; [the migration runner](internal/store/migrate.go) creates the ledger separately in `public`. The optional test profile targets a **different database**, `scc_test`, on the same `db` instance. It is disposable test storage, not a separate production queue database.
+[Migrations 001-009](migrations) define the application schema; [the migration runner](internal/store/migrate.go) creates the ledger separately in `public`. The optional test profile targets a **different database**, `scc_test`, on the same `db` instance. It is disposable test storage, not a separate production queue database.
 
 PostgreSQL fits the relational model: foreign keys connect campaigns, users, consents and deliveries; constraints enforce valid states and unique campaign/user/channel jobs; JSONB stores validated segment documents alongside relational records. Reusing it as the queue lets approval, frozen payload insertion and campaign state commit or roll back together. There is no database-to-broker dual write in this implementation. ADR-001/006 describe the choice, and ADR-023/024 describe the implemented transaction and worker semantics.
 
@@ -98,7 +98,7 @@ Approval validates the revision, reviewed audience fingerprint, saved content an
 
 There is **no application authentication or authorization**: no login, session/token verification, roles, tenant isolation or campaign ownership checks. Anyone who can reach the API directly on port 8080 or through the web `/api` proxy can read campaigns/templates, create and edit campaigns, request generation, and approve mock delivery subject to the same validation/state rules. Health, metrics and mock debug/ingress endpoints are also unauthenticated. The worker has no published HTTP port.
 
-`If-Match` revisions prevent stale writes; audience fingerprints detect changed review inputs; consent checks protect recipient eligibility. None identifies or authorizes a caller. The human-review checkbox is a UI safeguard, not server-enforced reviewer identity. `APP_ENV=production` does not add access control. All backend services share the powerful database role used for initialization/migrations; there is no per-service least-privilege role separation.
+`If-Match` revisions prevent stale writes; audience fingerprints detect changed review inputs; consent checks protect recipient eligibility. None identifies or authorizes a caller. The explicit approval confirmation is a UI safeguard, not server-enforced reviewer identity. `APP_ENV=production` does not add access control. All backend services share the powerful database role used for initialization/migrations; there is no per-service least-privilege role separation.
 
 Current host bindings are loopback only, and Compose configures database traffic with `sslmode=disable`; HTTP has no configured TLS termination. Loopback limits network reach, not access by local processes. Publishing ports on public interfaces or forwarding the web UI through a tunnel exposes campaign content, unauthenticated mutations/approval, metrics and resource consumption. In optional Anthropic mode, unauthenticated generation can also spend the operator's API budget. Exposing PostgreSQL with the demo credentials risks direct data modification and bypasses application validation; exposing mock ingress permits fabricated simulated acceptances. Mock-only destination/transport restrictions prevent real SMS/email, but do not provide access control. Public deployment requires authenticated access and server-side authorization, restricted database/provider access, proper credentials and TLS; this repository does not implement those boundaries.
 
@@ -107,8 +107,24 @@ Current host bindings are loopback only, and Compose configures database traffic
 1. Open [Campaign Studio](http://127.0.0.1:5173), select SMS and email, and create a brief such as: "A short, friendly 30% offer for Istanbul users who added to cart but did not purchase in the last 30 days."
 2. Generate the segment and preview audience counts. Mock mode returns the documented sample segment regardless of brief wording.
 3. Generate messages and watch the provisional stream become a validated suggestion. Edit the SMS or email subject, then click **Save messages**.
-4. Click **Review current audience**, inspect counts/content and check the human-review checkbox. Click **Approve & start mock delivery**.
+4. Click **Review & approve**. Inspect the fresh audience counts, selected channels and saved templates in the dialog, then click **Confirm approval & start mock delivery**. Cancel or Escape closes the review without approving. Returning to an unchanged campaign needs no checkbox; opening review always fetches a fresh snapshot.
 5. Watch pending/in-flight jobs become sent/dead/skipped until completed. Return to the list and open **View metrics**. Completed means all jobs are terminal, not that every job succeeded.
+
+### Interface languages
+
+The header language selector switches between **English** and **Türkçe** without reloading the current campaign. English is the default on every page load; the selection stays in memory while navigating within the SPA. Navigation, forms, dialogs, empty states, validation/errors and campaign/delivery status labels are translated through a typed Vue dictionary (`web/src/i18n.ts`), with no i18n package. Dates and numbers use `Intl` with en-US or tr-TR; timestamps remain UTC in storage and display in the browser's local timezone. The document lang attribute follows the selector.
+
+Language selection never changes briefs, saved/unsaved templates, generated/streamed content, template variable names, segments, prompts or API payloads. Errors/notices already on screen update when switching language. Protocol identifiers, raw Prometheus output and product/encoding names remain unchanged. Developer API documentation is in English.
+
+### OpenAPI and local Swagger UI
+
+Open [local Swagger UI](http://127.0.0.1:5173/docs/) from the footer, or retrieve the specification at [GET /openapi.json](http://127.0.0.1:8080/openapi.json). Through the web proxy it is available at `/api/openapi.json`. The canonical artifact is [docs/openapi.json](docs/openapi.json), embedded into the Go API without runtime file access. It uses **OpenAPI 3.2.1**, the latest stable 3.x release verified on 2026-10-25 against the [OpenAPI Initiative publication](https://spec.openapis.org/oas/v3.2.1.html). It documents the Go campaign API; the separate mock provider's ingress/debug contract remains in the worker/provider section below.
+
+The specification covers every campaign API route, full request/response schemas, lifecycle states, pagination, deletion, channel/rendering limits, error envelopes, POST SSE attempt/delta/validated/error frames, explicit saves and approval ETag/fingerprint/reconciliation requirements. The Go handlers/domain remain authoritative. Maintain the spec and Postman collection together when changing a route or contract. `make check` includes route/reference, DTO-field and Postman-coverage consistency checks; these supplement runtime tests rather than generating new API behavior.
+
+Swagger UI uses verified, exactly pinned `swagger-ui-dist` 5.34.0 ([upstream](https://github.com/swagger-api/swagger-ui)). It is a separate build entry: the campaign page does not load its roughly 1.5 MB JS bundle. Assets and specification are served locally, with public validator requests disabled. Try-it-out is available for GET only; campaign writes/approval stay in the application workflow. The docs HTML alone permits inline styles for Swagger panel sizing; script, connection and main-application CSP restrictions remain local/self-only. `npm ci --ignore-scripts` avoids the package's transitive install-time telemetry hook, as in the existing Docker build.
+
+**Authentication limitation:** there is no authentication, authorization, ownership/tenant filtering or authenticated reviewer identity. The OpenAPI security requirement is empty, deliberately; ETags and review fingerprints are concurrency protections, not credentials. Documentation does not add access control. Keep the current loopback-only deployment assumptions.
 
 The final requirement matrix, current test evidence and release checklist are in [docs/SUBMISSION_REVIEW.md](docs/SUBMISSION_REVIEW.md). Authentic sanitized development transcripts and provenance are in [ai-sessions/INDEX.md](ai-sessions/INDEX.md).
 
@@ -242,7 +258,29 @@ Slice 2 checks executed on 2026-10-21: `make check` passed (safety/formatting, v
 
 Make is now available. Race testing remains blocked by missing CGO/compiler support. The bundled skill validator passed (`Skill is valid!`) using verified, pinned PyYAML 6.0.3 installed only in a temporary tooling directory; no Python dependency was added to the project. The skill's description limits were also checked separately. These are historical foundation results; current submission coverage is recorded in [docs/SUBMISSION_REVIEW.md](docs/SUBMISSION_REVIEW.md).
 
+## Draft deletion
+
+`DELETE /campaigns/{id}` is bodyless and requires the current campaign ETag in `If-Match`, using the same exact token format as other mutations. Success is HTTP **204**, with no response body. Only unapproved `draft` and `content_ready` campaigns with no delivery rows or approval metadata may be deleted. Approved, sending, completed and cancelled campaigns are rejected. The Vue detail page exposes **Delete draft**, followed by a confirmation dialog; successful deletion returns to the campaign list.
+
+| Result | HTTP / code |
+| --- | --- |
+| Missing If-Match | 428 / `revision_required` |
+| Malformed or wrong-campaign token | 400 / `invalid_revision` |
+| Stale revision | 412 / `campaign_revision_conflict` |
+| Ineligible lifecycle, approval metadata or any delivery history | 409 / `invalid_campaign_state` |
+| Missing or already deleted campaign | 404 / `campaign_not_found` |
+| Nonempty body / invalid ID | 422 / `body_not_allowed` or `invalid_campaign_id` |
+| Oversized body / database unavailable | 413 / `body_too_large` or 503 / `database_unavailable` |
+
+Migration 009 adds `deleted_at` and a constraint forbidding deletion metadata on approved campaigns. A short transaction locks the campaign, verifies the revision, lifecycle, approval metadata and absence of deliveries, then records a UTC deletion timestamp, increments the revision once and sets the retained row to cancelled. Saves and approval use the same campaign lock. Existing restrictive foreign keys remain; nothing is cascaded or physically removed. Campaign content, saved templates and LLM audit rows remain stored, including audit results from generation already in progress. Audited LLM metrics retain those calls.
+
+GET campaign/list/messages/delivery-status and generation/preview/save/approve operations hide tombstones (404 for individual resources); a generation already underway may finish its preview but cannot save or revive the deleted campaign. Repeated DELETE returns 404 with no further side effect. After an uncertain response, GET establishes whether deletion completed; never silently attach a fresh revision to a rejected deletion. All existing campaign/message/approval response shapes and approval revision/fingerprint checks remain unchanged.
+
 ## Known gaps
+
+- Interface language selection is in-memory and resets to English on reload. Developer documentation and raw protocol/metrics identifiers stay English. Swagger UI is a separate, larger developer-only bundle; browser try-it-out is read-only and does not replace the streaming regression suite.
+
+- Draft deletion removes campaigns from the workspace while retaining stored data and audit records. There is no restore, purge, retention scheduler or authenticated deletion/reviewer identity. Existing local-only access limitations still apply.
 
 - The Claude adapter is tested against local protocol fixtures; live model access, latency and account-specific compatibility remain unverified. The default mock segment generator always returns the sample Istanbul/cart/no-purchase fixture and does not interpret arbitrary briefs. The UI states this limitation.
 - The delivery dashboard polls every 2 seconds, backing off to 5 seconds on errors; push updates are not required by the assignment. System metrics refresh on demand. Current database records do not support complete per-attempt outcome history or provider-latency metrics; those proposed metrics are deferred rather than estimated. SMS segment estimates describe the template only; personalization can change encoding/segments.
@@ -539,3 +577,27 @@ The full Docker PostgreSQL integration suite passed against disposable scc_test:
 A forced database container recreation preserved aggregate counts: 5000 users, 8 migrations, 2 campaigns, 6267 deliveries and 6267 mock acceptances; API /ready returned ready afterward. These are observed test-run counts, not fixed application requirements.
 
 The first integration/Postman attempt was interrupted by Docker Desktop stopping; both were rerun after restarting it. A sandboxed make check rerun blocked local HTTP fixtures; the approved local-access rerun passed. No tests were removed or skipped. Safety rules 1/3/4 remain covered by the existing segment/consent/queue integration tests; rules 2/6 by mock-only services and test configuration; rules 5/7 by the repository safety scanner and explicit template-only Compose invocation. No real Claude call or real delivery occurred. Browser E2E tests were not rerun for this infrastructure change.
+
+## Campaign UX and draft deletion verification (2026-10-25)
+
+Executed against local mock/test services only:
+
+- `make check`: exit 0; actual output included `repository safety and formatting checks passed`, successful Go vet/tests and `Tests 21 passed (21)` across six frontend test files.
+- `npm.cmd --prefix web run build`: exit 0; strict Vue/TypeScript check and Vite production build passed.
+- `docker compose --env-file .env.example --profile test run --build --rm test`: exit 0; actual output `ok github.com/KayaOrhan/SmartCampaignComposer/internal/store 22.502s`. This uses the disposable scc_test database, not application data. Coverage includes migrations, audit/content retention, safe lifecycle/history rejection, tombstone visibility and delete/save/approve races, alongside existing delivery/consent/fingerprint suites.
+- `npm.cmd --prefix web run test:e2e`: exit 0; `6 passed (29.2s)`. Browser regressions cover the complete mock delivery flow, unchanged-campaign return, saved templates/counts in review, no checkbox, explicit confirmation, stale saves/reviews/deletion, Cancel/Escape, functional empty-state plus and mobile layout. The browser fingerprint-conflict response is simulated; PostgreSQL same-count audience-change tests prove actual fingerprint detection. The mobile dialog screenshot was visually inspected.
+- Maintained official Postman CLI collection against loopback port 8080: 234 requests and 596 assertions, zero failures. Cloud reporting disabled. The first run exposed the obsolete DELETE-is-unsupported assertion; it now checks PATCH. The full rerun passed, including guarded deletion and retained completed delivery history. Counts vary with completion polling.
+- A temporary removal of the frontend human-confirmation guard caused two useCampaign tests to fail; source was restored and final checks passed. No test or validator was skipped. `git diff --check` passed, and the actual implementation diff and new files were reviewed: No findings.
+
+Safety coverage: RULES 1/3 retain validated parameterized segment queries and consent-aware approval, covered by existing domain/approval integration tests; rule 4 retains atomic queue uniqueness and repeat guards, with `TestDeleteRacesApprovalAndSave` additionally protecting lifecycle races. Rule 5 retains private payloads and audit records (`TestDeleteRetainsAuditAndHidesCampaign`, HTTP aggregate assertions and the repository safety scanner). Rule 6 uses explicit mock/test configuration and existing real-client construction guards. Rule 9 is supported by the observed confirmation-guard failure control. No real Claude, SMS or email calls, new dependency, protected-file access or commit was performed.
+
+## Bilingual UI and OpenAPI verification (2026-10-25)
+
+- `make check` passed: actual output included `repository safety and formatting checks passed` and `Tests 25 passed (25)`. Go vet/tests, strict Vue/TypeScript checks and frontend tests pass. The production build emits separate app/docs entries; Vite reports the expected Swagger bundle-size advisory.
+- PostgreSQL integration passed against disposable scc_test: `ok github.com/KayaOrhan/SmartCampaignComposer/internal/store 21.465s`. No persistence/lifecycle contract was changed.
+- Browser regressions: `9 passed (2.3m)`, including existing complete mock delivery, stale review/save/delete safeguards, Turkish navigation/validation/dialogs and switching without changing authored or generated content. Local Swagger UI loaded without page/console errors or external requests. Turkish mobile review and Swagger screenshots were visually inspected.
+- Official Postman CLI against the local mock/test API: 234 requests, 597 assertions, zero failures, exit 0, cloud reporting disabled. Includes the new documentation endpoint and existing approval/queue/deletion regressions. Completion polling makes totals variable.
+- The restored canonical spec passed the official OpenAPI 3.2 schema (2026-08-30 iteration); all component schemas passed JSON Schema 2020-12 checks, using verified jsonschema 4.26.0 installed only in a temporary validation directory, then removed. The public schema does not prove semantic parity; Go route/DTO/reference/Postman checks and executed regressions provide that additional evidence.
+- Negative controls: disabling Turkish lookup failed two i18n tests; removing approval's If-Match parameter from the spec failed `TestOpenAPIRoutesAndReferences`. Both files were restored before final checks. No tests or guards were skipped.
+
+Safety rules 1/3/4 retain existing validated queries, consent checks, frozen delivery snapshots and idempotency, covered by existing Go/PostgreSQL/browser/Postman regressions. Rule 5 retains plain-text rendering and excludes user data from translation keys; i18n tests/browser round trips prove content/placeholder preservation, while the repository scanner remains active. Rule 6 retains explicit mock/test configuration and the existing real-client test guard. Rule 8 is satisfied by registry/upstream verification and exact Swagger pin; rule 9 by executed negative controls and restored passing tests. No real Claude, SMS or email call, protected-file access, endpoint redesign or commit was performed.
