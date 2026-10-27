@@ -125,3 +125,15 @@ One entry per exported session. Written at the end of the session, while it is f
 - Kept: Existing authored data, API machine contracts, explicit human review and deletion safeguards; English default, no i18n dependency, local-only Swagger assets, mock-only tests and no commits.
 - Where the agent was wrong: The first automated text replacement retained v-pre around translated placeholder help; inspection caught and corrected it before browser verification. Review also guarded error-code lookup against object prototype names.
 - How I caught it: 25 frontend tests, Go route/DTO/reference/Postman consistency, official OpenAPI/schema validation, PostgreSQL integration, nine browser regressions and 234-request/597-assertion local Postman execution. Translation and approval-documentation mutations failed the expected tests; restored final sources passed checks. Evidence and limitations are in README.
+
+## 2026-10-25 Submission review documentation refresh
+- Delegated: No subagents; documentation-only verification and comparison with current source, Git state, README evidence and export inventory.
+- Kept: Existing committed implementation and safety rules; no runtime changes, application test reruns, publication or commits.
+- Where the agent was wrong: The first combined read truncated the review; bounded reads recovered the full findings/checklist before editing. No new runtime defect was investigated.
+- How I caught it: Actual Git status/HEAD tracked-file checks, current configuration and recorded verification exposed stale packaging, checkbox, test-count, database-exposure and export-completeness claims. Reviewed the documentation diff and validated local links; remaining submission TODOs are explicit in docs/SUBMISSION_REVIEW.md.
+
+## 2026-10-27 Published-checkout submission verification
+- Delegated: No subagents; used local verification and the official Postman testing workflow.
+- Kept: User requested release-state verification only; preserved implementation, existing documentation refresh, original database volumes, mock-only services and explicit commit approval.
+- Where the agent was wrong: The initial clean-checkout Compose invocation lacked sandbox access to Docker; no application defect was identified.
+- How I caught it: Approved Docker access, a Git-clean remote checkout at c82409c, fresh-volume startup, 5000-user/nine-migration counts, make check, uncached Go tests, production/Docker builds, PostgreSQL integration, nine browser tests and 235-request/600-assertion local Postman passed. Restored the original stack; only the report/index require approved commit/publication. This is a verification note, not a conversation export.
